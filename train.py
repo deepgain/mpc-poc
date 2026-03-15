@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DeepGain — Train f, g, r networks from training_data.csv"""
+"""DeepGain — Train f, g, r networks from training_data.csv (RIR-based, v3)"""
 
 import torch
 import torch.nn as nn
@@ -11,7 +11,6 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from collections import defaultdict
 import warnings
 import time
 warnings.filterwarnings("ignore")
@@ -28,6 +27,7 @@ CHUNK_LEN = 256
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
 REPS_SCALE = 30.0
+RIR_SCALE = 5.0
 DT_SCALE = np.log1p(168.0)
 
 # ─── Muscles (16 groups) ───
@@ -74,7 +74,6 @@ ALL_EXERCISES = list(EXERCISE_MUSCLES.keys())
 NUM_EXERCISES = len(ALL_EXERCISES)
 EXERCISE_TO_IDX = {e: i for i, e in enumerate(ALL_EXERCISES)}
 
-# Build involvement matrix (NUM_EXERCISES x NUM_MUSCLES)
 INVOLVEMENT_MATRIX = np.zeros((NUM_EXERCISES, NUM_MUSCLES), dtype=np.float32)
 for ex_name, muscles in EXERCISE_MUSCLES.items():
     ei = EXERCISE_TO_IDX[ex_name]
@@ -123,9 +122,9 @@ def build_user_sequences(user_df):
         seq = {
             "user_id": uid,
             "exercise_idx": torch.tensor(grp["exercise_idx"].values, dtype=torch.long),
-            "weight": torch.tensor(grp["weight"].values / WEIGHT_SCALE, dtype=torch.float32),
+            "weight": torch.tensor(grp["weight_kg"].values / WEIGHT_SCALE, dtype=torch.float32),
             "reps": torch.tensor(grp["reps"].values / REPS_SCALE, dtype=torch.float32),
-            "rpe": torch.tensor(grp["rpe"].values / 10.0, dtype=torch.float32),
+            "rir": torch.tensor(grp["rir"].values / RIR_SCALE, dtype=torch.float32),
             "delta_t": torch.tensor(
                 np.log1p(grp["delta_t_hours"].values) / DT_SCALE, dtype=torch.float32
             ),
@@ -146,7 +145,7 @@ def chunk_sequence(seq, chunk_len):
             "exercise_idx": seq["exercise_idx"][start:end],
             "weight": seq["weight"][start:end],
             "reps": seq["reps"][start:end],
-            "rpe": seq["rpe"][start:end],
+            "rir": seq["rir"][start:end],
             "delta_t": seq["delta_t"][start:end],
         }
         if "timestamps" in seq:
@@ -174,7 +173,7 @@ def collate_fn(batch):
         "exercise_idx": torch.zeros(B, max_len, dtype=torch.long),
         "weight": torch.zeros(B, max_len),
         "reps": torch.zeros(B, max_len),
-        "rpe": torch.zeros(B, max_len),
+        "rir": torch.zeros(B, max_len),
         "delta_t": torch.zeros(B, max_len),
         "mask": torch.zeros(B, max_len),
     }
@@ -183,7 +182,7 @@ def collate_fn(batch):
         out["exercise_idx"][i, :T] = b["exercise_idx"]
         out["weight"][i, :T] = b["weight"]
         out["reps"][i, :T] = b["reps"]
-        out["rpe"][i, :T] = b["rpe"]
+        out["rir"][i, :T] = b["rir"]
         out["delta_t"][i, :T] = b["delta_t"]
         out["mask"][i, :T] = 1.0
     return out
@@ -205,6 +204,7 @@ class FatigueNet(nn.Module):
     """f: predicts MPC drop fraction after a set."""
     def __init__(self, embed_dim, hidden_dim):
         super().__init__()
+        # inputs: weight(1) + reps(1) + rir(1) + current_mpc(1) + exercise_embed + muscle_embed
         self.net = nn.Sequential(
             nn.Linear(4 + 2 * embed_dim, hidden_dim),
             nn.ReLU(),
@@ -215,19 +215,20 @@ class FatigueNet(nn.Module):
         )
         nn.init.constant_(self.net[-2].bias, -2.0)
 
-    def forward(self, weight, reps, rpe, mpc, e_embed, m_embed):
+    def forward(self, weight, reps, rir, mpc, e_embed, m_embed):
         x = torch.cat([
             weight.unsqueeze(-1), reps.unsqueeze(-1),
-            rpe.unsqueeze(-1), mpc.unsqueeze(-1),
+            rir.unsqueeze(-1), mpc.unsqueeze(-1),
             e_embed, m_embed
         ], dim=-1)
         return self.net(x).squeeze(-1)
 
 
-class RPENet(nn.Module):
-    """g: predicts RPE from current MPC state."""
+class RIRNet(nn.Module):
+    """g: predicts RIR from current MPC state."""
     def __init__(self, embed_dim, hidden_dim, num_muscles):
         super().__init__()
+        # inputs: weight(1) + reps(1) + exercise_embed(E) + all_mpc(16)
         self.net = nn.Sequential(
             nn.Linear(2 + embed_dim + num_muscles, hidden_dim),
             nn.ReLU(),
@@ -242,6 +243,7 @@ class RPENet(nn.Module):
             e_embed, mpc_all
         ], dim=-1)
         raw = self.net(x).squeeze(-1)
+        # Output in (0, 1) — maps to RIR 0-5 when denormalized
         return torch.sigmoid(raw)
 
 
@@ -270,18 +272,18 @@ class DeepGainModel(nn.Module):
         self.exercise_embed = nn.Embedding(num_exercises, embed_dim)
         self.muscle_embed = nn.Embedding(num_muscles, embed_dim)
         self.f_net = FatigueNet(embed_dim, hidden_dim)
-        self.g_net = RPENet(embed_dim, hidden_dim, num_muscles)
+        self.g_net = RIRNet(embed_dim, hidden_dim, num_muscles)
         self.r_net = RecoveryNet(embed_dim, hidden_dim)
         self.register_buffer("involvement",
                              torch.tensor(INVOLVEMENT_MATRIX, dtype=torch.float32))
 
-    def forward(self, exercise_idx, weight, reps, rpe_target, delta_t, mask):
+    def forward(self, exercise_idx, weight, reps, rir_target, delta_t, mask):
         B, T = exercise_idx.shape
         M = self.num_muscles
         device = exercise_idx.device
 
         mpc = torch.ones(B, M, device=device)
-        rpe_preds = []
+        rir_preds = []
 
         all_m_idx = torch.arange(M, device=device)
         all_m_embed = self.muscle_embed(all_m_idx)
@@ -298,32 +300,32 @@ class DeepGainModel(nn.Module):
 
             e_idx = exercise_idx[:, t]
             e_embed = self.exercise_embed(e_idx)
-            rpe_pred = self.g_net(weight[:, t], reps[:, t], e_embed, mpc)
-            rpe_preds.append(rpe_pred)
+            rir_pred = self.g_net(weight[:, t], reps[:, t], e_embed, mpc)
+            rir_preds.append(rir_pred)
 
             inv = self.involvement[e_idx]
             e_emb_exp = e_embed.unsqueeze(1).expand(-1, M, -1).reshape(-1, E)
             w_exp = weight[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
             r_exp = reps[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
-            rpe_exp = rpe_target[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
+            rir_exp = rir_target[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
             mpc_flat = mpc.reshape(-1)
             m_emb_flat = all_m_embed_expanded.reshape(-1, E)
 
-            drop = self.f_net(w_exp, r_exp, rpe_exp, mpc_flat, e_emb_exp, m_emb_flat)
+            drop = self.f_net(w_exp, r_exp, rir_exp, mpc_flat, e_emb_exp, m_emb_flat)
             drop = drop.reshape(B, M)
             mpc = (mpc * (1.0 - inv * drop)).clamp(min=0.1)
 
-        rpe_preds = torch.stack(rpe_preds, dim=1)
-        return rpe_preds, mpc
+        rir_preds = torch.stack(rir_preds, dim=1)
+        return rir_preds, mpc
 
-    def forward_with_mpc_history(self, exercise_idx, weight, reps, rpe_target, delta_t):
+    def forward_with_mpc_history(self, exercise_idx, weight, reps, rir_target, delta_t):
         B, T = exercise_idx.shape
         assert B == 1
         M = self.num_muscles
         device = exercise_idx.device
 
         mpc = torch.ones(1, M, device=device)
-        rpe_preds = []
+        rir_preds = []
         mpc_history = [mpc[0].detach().cpu().numpy().copy()]
 
         all_m_idx = torch.arange(M, device=device)
@@ -341,21 +343,21 @@ class DeepGainModel(nn.Module):
 
             e_idx = exercise_idx[:, t]
             e_embed = self.exercise_embed(e_idx)
-            rpe_pred = self.g_net(weight[:, t], reps[:, t], e_embed, mpc)
-            rpe_preds.append(rpe_pred.item())
+            rir_pred = self.g_net(weight[:, t], reps[:, t], e_embed, mpc)
+            rir_preds.append(rir_pred.item())
 
             inv = self.involvement[e_idx]
             e_emb_exp = e_embed.unsqueeze(1).expand(-1, M, -1).reshape(-1, E)
             w_exp = weight[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
             r_exp = reps[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
-            rpe_exp = rpe_target[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
+            rir_exp = rir_target[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
             mpc_flat = mpc.reshape(-1)
             m_emb_flat = all_m_embed_expanded.reshape(-1, E)
-            drop = self.f_net(w_exp, r_exp, rpe_exp, mpc_flat, e_emb_exp, m_emb_flat).reshape(1, M)
+            drop = self.f_net(w_exp, r_exp, rir_exp, mpc_flat, e_emb_exp, m_emb_flat).reshape(1, M)
             mpc = (mpc * (1.0 - inv * drop)).clamp(min=0.1)
             mpc_history.append(mpc[0].detach().cpu().numpy().copy())
 
-        return np.array(rpe_preds), np.array(mpc_history)
+        return np.array(rir_preds), np.array(mpc_history)
 
 
 model = DeepGainModel(NUM_EXERCISES, NUM_MUSCLES, EMBED_DIM, HIDDEN_DIM).to(DEVICE)
@@ -377,9 +379,9 @@ def evaluate(mdl, loader):
     total_count = 0
     for batch in loader:
         batch = {k: v.to(DEVICE) for k, v in batch.items()}
-        rpe_pred, _ = mdl(batch["exercise_idx"], batch["weight"],
-                          batch["reps"], batch["rpe"], batch["delta_t"], batch["mask"])
-        loss = masked_mse(rpe_pred, batch["rpe"], batch["mask"])
+        rir_pred, _ = mdl(batch["exercise_idx"], batch["weight"],
+                          batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
+        loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
         n = batch["mask"].sum().item()
         total_loss += loss.item() * n
         total_count += n
@@ -404,9 +406,9 @@ for epoch in range(EPOCHS):
     for batch_idx, batch in enumerate(train_loader):
         batch = {k: v.to(DEVICE) for k, v in batch.items()}
         optimizer.zero_grad()
-        rpe_pred, _ = model(batch["exercise_idx"], batch["weight"],
-                            batch["reps"], batch["rpe"], batch["delta_t"], batch["mask"])
-        loss = masked_mse(rpe_pred, batch["rpe"], batch["mask"])
+        rir_pred, _ = model(batch["exercise_idx"], batch["weight"],
+                            batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
+        loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -427,10 +429,10 @@ for epoch in range(EPOCHS):
     val_losses.append(val_loss)
 
     elapsed = time.time() - t0
-    train_rmse = np.sqrt(train_loss) * 10.0
-    val_rmse = np.sqrt(val_loss) * 10.0
+    train_rmse = np.sqrt(train_loss) * RIR_SCALE
+    val_rmse = np.sqrt(val_loss) * RIR_SCALE
     print(f"Epoch {epoch+1:3d}/{EPOCHS} | "
-          f"Train RMSE: {train_rmse:.2f} | Val RMSE: {val_rmse:.2f} | "
+          f"Train RMSE: {train_rmse:.2f} RIR | Val RMSE: {val_rmse:.2f} RIR | "
           f"{elapsed:.0f}s", flush=True)
 
 # Save model
@@ -447,11 +449,11 @@ def collect_predictions(mdl, loader):
     all_preds, all_targets, all_exercises = [], [], []
     for batch in loader:
         batch = {k: v.to(DEVICE) for k, v in batch.items()}
-        rpe_pred, _ = mdl(batch["exercise_idx"], batch["weight"],
-                          batch["reps"], batch["rpe"], batch["delta_t"], batch["mask"])
+        rir_pred, _ = mdl(batch["exercise_idx"], batch["weight"],
+                          batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
         mask = batch["mask"].bool()
-        all_preds.append((rpe_pred[mask] * 10.0).cpu().numpy())
-        all_targets.append((batch["rpe"][mask] * 10.0).cpu().numpy())
+        all_preds.append((rir_pred[mask] * RIR_SCALE).cpu().numpy())
+        all_targets.append((batch["rir"][mask] * RIR_SCALE).cpu().numpy())
         all_exercises.append(batch["exercise_idx"][mask].cpu().numpy())
     return np.concatenate(all_preds), np.concatenate(all_targets), np.concatenate(all_exercises)
 
@@ -463,7 +465,7 @@ mae = np.mean(np.abs(test_preds - test_targets))
 rmse = np.sqrt(mse)
 corr = np.corrcoef(test_preds, test_targets)[0, 1]
 
-print(f"\nTest Metrics (RPE scale 1-10):")
+print(f"\nTest Metrics (RIR scale 0-5):")
 print(f"  MSE:  {mse:.4f}")
 print(f"  RMSE: {rmse:.4f}")
 print(f"  MAE:  {mae:.4f}")
@@ -488,10 +490,10 @@ muscle_colors = plt.cm.tab20(np.linspace(0, 1, NUM_MUSCLES))
 # --- Chart 1: Loss Curves ---
 fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 epochs_range = range(1, len(train_losses) + 1)
-ax.plot(epochs_range, [np.sqrt(l) * 10 for l in train_losses], label="Train RMSE", linewidth=2)
-ax.plot(epochs_range, [np.sqrt(l) * 10 for l in val_losses], label="Val RMSE", linewidth=2)
+ax.plot(epochs_range, [np.sqrt(l) * RIR_SCALE for l in train_losses], label="Train RMSE", linewidth=2)
+ax.plot(epochs_range, [np.sqrt(l) * RIR_SCALE for l in val_losses], label="Val RMSE", linewidth=2)
 ax.set_xlabel("Epoch")
-ax.set_ylabel("RMSE (RPE scale)")
+ax.set_ylabel("RMSE (RIR scale)")
 ax.set_title("Training & Validation Loss")
 ax.legend()
 ax.grid(True, alpha=0.3)
@@ -499,21 +501,21 @@ plt.tight_layout()
 plt.savefig("chart_loss_curves.png", dpi=150)
 print("Saved chart_loss_curves.png")
 
-# --- Chart 2: RPE Prediction Accuracy ---
+# --- Chart 2: RIR Prediction Accuracy ---
 fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
 ax = axes[0]
 n_sample = min(15000, len(test_preds))
 idx = np.random.choice(len(test_preds), n_sample, replace=False)
 ax.scatter(test_targets[idx], test_preds[idx], alpha=0.05, s=8, c="steelblue")
-ax.plot([1, 10], [1, 10], "r--", linewidth=2, label="Perfect")
+ax.plot([0, 5], [0, 5], "r--", linewidth=2, label="Perfect")
 r2 = corr ** 2
-ax.set_xlabel("Actual RPE")
-ax.set_ylabel("Predicted RPE")
-ax.set_title(f"Predicted vs Actual RPE (R²={r2:.3f})")
+ax.set_xlabel("Actual RIR")
+ax.set_ylabel("Predicted RIR")
+ax.set_title(f"Predicted vs Actual RIR (R²={r2:.3f})")
 ax.legend()
-ax.set_xlim(1, 10.5)
-ax.set_ylim(1, 10.5)
+ax.set_xlim(-0.5, 5.5)
+ax.set_ylim(-0.5, 5.5)
 ax.grid(True, alpha=0.3)
 
 ax = axes[1]
@@ -524,7 +526,7 @@ colors = ["#e74c3c" if v > np.median(vals) else "#2ecc71" for v in vals]
 ax.barh(range(len(names)), vals, color=colors, alpha=0.8)
 ax.set_yticks(range(len(names)))
 ax.set_yticklabels(names, fontsize=8)
-ax.set_xlabel("MAE (RPE)")
+ax.set_xlabel("MAE (RIR)")
 ax.set_title("Per-Exercise MAE")
 ax.invert_yaxis()
 ax.grid(True, alpha=0.3, axis="x")
@@ -533,14 +535,14 @@ ax = axes[2]
 errors = test_preds - test_targets
 ax.hist(errors, bins=80, color="steelblue", alpha=0.7, density=True)
 ax.axvline(0, color="red", linestyle="--", linewidth=2)
-ax.set_xlabel("RPE Error (pred - actual)")
+ax.set_xlabel("RIR Error (pred - actual)")
 ax.set_ylabel("Density")
 ax.set_title(f"Error Distribution (mean={np.mean(errors):.3f}, std={np.std(errors):.3f})")
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("chart_rpe_accuracy.png", dpi=150)
-print("Saved chart_rpe_accuracy.png")
+plt.savefig("chart_rir_accuracy.png", dpi=150)
+print("Saved chart_rir_accuracy.png")
 
 # --- Chart 3: MPC Trajectories ---
 test_sequences = build_user_sequences(test_df)
@@ -558,9 +560,9 @@ for row, seq in enumerate(sample_users):
         ex = seq["exercise_idx"][:T_plot].unsqueeze(0).to(DEVICE)
         w = seq["weight"][:T_plot].unsqueeze(0).to(DEVICE)
         r = seq["reps"][:T_plot].unsqueeze(0).to(DEVICE)
-        rpe = seq["rpe"][:T_plot].unsqueeze(0).to(DEVICE)
+        rir = seq["rir"][:T_plot].unsqueeze(0).to(DEVICE)
         dt = seq["delta_t"][:T_plot].unsqueeze(0).to(DEVICE)
-        rpe_preds_seq, mpc_hist = model.forward_with_mpc_history(ex, w, r, rpe, dt)
+        rir_preds_seq, mpc_hist = model.forward_with_mpc_history(ex, w, r, rir, dt)
 
     timestamps = seq["timestamps"][:T_plot]
     t0_ts = timestamps[0]
@@ -590,13 +592,13 @@ for row, seq in enumerate(sample_users):
         ax.set_xlabel("Hours from first set")
 
     ax = axes[row, 1]
-    actual_rpe = seq["rpe"][:T_plot].numpy() * 10.0
-    ax.scatter(hours, actual_rpe, s=8, alpha=0.4, c="steelblue", label="Actual RPE")
-    ax.scatter(hours, rpe_preds_seq * 10.0, s=8, alpha=0.4, c="coral", label="Predicted RPE")
-    ax.set_ylabel("RPE")
-    ax.set_title(f"RPE Prediction — {uid}")
+    actual_rir = seq["rir"][:T_plot].numpy() * RIR_SCALE
+    ax.scatter(hours, actual_rir, s=8, alpha=0.4, c="steelblue", label="Actual RIR")
+    ax.scatter(hours, np.array(rir_preds_seq) * RIR_SCALE, s=8, alpha=0.4, c="coral", label="Predicted RIR")
+    ax.set_ylabel("RIR")
+    ax.set_title(f"RIR Prediction — {uid}")
     ax.legend(fontsize=8)
-    ax.set_ylim(1, 11)
+    ax.set_ylim(-0.5, 5.5)
     ax.grid(True, alpha=0.3)
     if row == 2:
         ax.set_xlabel("Hours from first set")
@@ -657,10 +659,10 @@ with torch.no_grad():
             for wi, w_val in enumerate(weight_range):
                 w_t = torch.tensor([w_val], dtype=torch.float32, device=DEVICE)
                 r_t = torch.tensor([r_val], dtype=torch.float32, device=DEVICE)
-                rpe_t = torch.tensor([0.8], dtype=torch.float32, device=DEVICE)
+                rir_t = torch.tensor([0.4], dtype=torch.float32, device=DEVICE)  # RIR 2
                 mpc_t = torch.tensor([1.0], dtype=torch.float32, device=DEVICE)
 
-                d = model.f_net(w_t, r_t, rpe_t, mpc_t, e_embed, m_embed).item()
+                d = model.f_net(w_t, r_t, rir_t, mpc_t, e_embed, m_embed).item()
                 drop_grid[ri, wi] = d * muscles[primary_muscle]
 
         ax = axes[col]
@@ -671,7 +673,7 @@ with torch.no_grad():
         ax.set_title(f"MPC Drop: {ex_name.replace('_', ' ')}\n(primary: {primary_muscle})")
         plt.colorbar(im, ax=ax, label="MPC drop")
 
-plt.suptitle("Fatigue Response (f) at RPE 8, MPC=1.0", fontsize=14, y=1.02)
+plt.suptitle("Fatigue Response (f) at RIR 2, MPC=1.0", fontsize=14, y=1.02)
 plt.tight_layout()
 plt.savefig("chart_fatigue_heatmaps.png", dpi=150)
 print("Saved chart_fatigue_heatmaps.png")
