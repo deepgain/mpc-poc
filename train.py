@@ -15,16 +15,21 @@ import warnings
 import time
 warnings.filterwarnings("ignore")
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+else:
+    DEVICE = torch.device("cpu")
 print(f"Device: {DEVICE}")
 
 # ─── Hyperparameters ───
-EMBED_DIM = 16
-HIDDEN_DIM = 64
+EMBED_DIM = 32
+HIDDEN_DIM = 128
 LR = 1e-3
-EPOCHS = 50
-CHUNK_LEN = 256
-BATCH_SIZE = 16
+EPOCHS = 100
+CHUNK_LEN = 512
+BATCH_SIZE = 8
 WEIGHT_SCALE = 200.0
 REPS_SCALE = 30.0
 RIR_SCALE = 5.0
@@ -204,13 +209,14 @@ class FatigueNet(nn.Module):
     """f: predicts MPC drop fraction after a set."""
     def __init__(self, embed_dim, hidden_dim):
         super().__init__()
-        # inputs: weight(1) + reps(1) + rir(1) + current_mpc(1) + exercise_embed + muscle_embed
         self.net = nn.Sequential(
             nn.Linear(4 + 2 * embed_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
             nn.Sigmoid(),
         )
         nn.init.constant_(self.net[-2].bias, -2.0)
@@ -228,13 +234,14 @@ class RIRNet(nn.Module):
     """g: predicts RIR from current MPC state."""
     def __init__(self, embed_dim, hidden_dim, num_muscles):
         super().__init__()
-        # inputs: weight(1) + reps(1) + exercise_embed(E) + all_mpc(16)
         self.net = nn.Sequential(
             nn.Linear(2 + embed_dim + num_muscles, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
         )
 
     def forward(self, weight, reps, e_embed, mpc_all):
@@ -243,12 +250,11 @@ class RIRNet(nn.Module):
             e_embed, mpc_all
         ], dim=-1)
         raw = self.net(x).squeeze(-1)
-        # Output in (0, 1) — maps to RIR 0-5 when denormalized
         return torch.sigmoid(raw)
 
 
 class RecoveryNet(nn.Module):
-    """r: predicts recovery fraction toward MPC=1.0."""
+    """r: predicts recovered MPC — no constraints, learned from data."""
     def __init__(self, embed_dim, hidden_dim):
         super().__init__()
         self.net = nn.Sequential(
@@ -256,13 +262,14 @@ class RecoveryNet(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
         )
 
     def forward(self, mpc, delta_t, m_embed):
         x = torch.cat([mpc.unsqueeze(-1), delta_t.unsqueeze(-1), m_embed], dim=-1)
-        recovery_frac = torch.sigmoid(self.net(x).squeeze(-1))
-        return mpc + (1.0 - mpc) * recovery_frac
+        return torch.sigmoid(self.net(x).squeeze(-1))
 
 
 class DeepGainModel(nn.Module):
