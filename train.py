@@ -100,6 +100,25 @@ df["exercise_idx"] = df["exercise"].map(EXERCISE_TO_IDX)
 df = df.dropna(subset=["exercise_idx"])
 df["exercise_idx"] = df["exercise_idx"].astype(int)
 
+# ── CURRICULUM: focus on specific muscles ──
+# Set to None to train on everything, or list target muscles
+FOCUS_MUSCLES = ["chest", "triceps"]
+# FOCUS_MUSCLES = None  # uncomment for all muscles
+
+if FOCUS_MUSCLES:
+    # Auto-include any exercise that involves any target muscle
+    focus_exercises = set()
+    for ex, muscles in EXERCISE_MUSCLES.items():
+        if any(m in FOCUS_MUSCLES for m in muscles):
+            focus_exercises.add(ex)
+    df = df[df["exercise"].isin(focus_exercises)].copy()
+    user_counts = df.groupby("user_id").size()
+    valid_users = user_counts[user_counts >= 50].index
+    df = df[df["user_id"].isin(valid_users)].copy()
+    df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
+    print(f"Curriculum: {FOCUS_MUSCLES} → {len(focus_exercises)} exercises: {sorted(focus_exercises)}")
+    print(f"  Users with 50+ sets: {df['user_id'].nunique()}")
+
 df["delta_t_hours"] = df.groupby("user_id")["timestamp"].diff().dt.total_seconds() / 3600.0
 df["delta_t_hours"] = df["delta_t_hours"].fillna(0.0)
 
