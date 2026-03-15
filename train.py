@@ -438,9 +438,22 @@ for epoch in range(EPOCHS):
     elapsed = time.time() - t0
     train_rmse = np.sqrt(train_loss) * RIR_SCALE
     val_rmse = np.sqrt(val_loss) * RIR_SCALE
+
+    # Recovery probe: chest (idx 0) at MPC=0.5, sweep 2h/12h/48h
+    with torch.no_grad():
+        chest_embed = model.muscle_embed(torch.tensor([0], device=DEVICE))
+        probe_results = []
+        for dt_h in [2.0, 12.0, 48.0]:
+            dt_norm = torch.tensor([np.log1p(dt_h) / DT_SCALE], dtype=torch.float32, device=DEVICE)
+            mpc_in = torch.tensor([0.5], dtype=torch.float32, device=DEVICE)
+            mpc_out = model.r_net(mpc_in, dt_norm, chest_embed).item()
+            probe_results.append(f"{dt_h:.0f}h→{mpc_out:.3f}")
+    recovery_str = "  r(chest,0.5): " + " | ".join(probe_results)
+
     print(f"Epoch {epoch+1:3d}/{EPOCHS} | "
           f"Train RMSE: {train_rmse:.2f} RIR | Val RMSE: {val_rmse:.2f} RIR | "
           f"{elapsed:.0f}s", flush=True)
+    print(recovery_str, flush=True)
 
 # Save model
 torch.save(model.state_dict(), "deepgain_model.pt")
