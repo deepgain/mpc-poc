@@ -28,9 +28,9 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 32
 HIDDEN_DIM = 128
 LR = 1e-3
-EPOCHS = 100
+EPOCHS = 200
 CHUNK_LEN = 512
-BATCH_SIZE = 8
+BATCH_SIZE = 64
 WEIGHT_SCALE = 200.0
 REPS_SCALE = 30.0
 RIR_SCALE = 5.0
@@ -279,7 +279,17 @@ class ExponentialRecovery(nn.Module):
     r(MPC, Δt, muscle) = 1 - (1 - MPC) · exp(-Δt / τ_m)
 
     Path-consistent by construction. 16 learnable parameters.
+
+    Soft ordering penalty: mean(small τ) < mean(medium τ) < mean(large τ)
+    Small:  triceps, biceps, brachialis, calves, rear_delts, lateral_delts
+    Medium: chest, anterior_delts, upper_traps, rhomboids, lats, erectors
+    Large:  quads, hamstrings, glutes, adductors
     """
+    # Muscle indices by size bucket (matches ALL_MUSCLES ordering)
+    SMALL_IDX  = [6, 7, 8, 15, 3, 2]   # triceps, biceps, brachialis, calves, rear_delts, lateral_delts
+    MEDIUM_IDX = [0, 1, 4, 5, 9, 14]    # chest, anterior_delts, upper_traps, rhomboids, lats, erectors
+    LARGE_IDX  = [10, 11, 12, 13]        # quads, hamstrings, glutes, adductors
+
     def __init__(self, num_muscles):
         super().__init__()
         self.log_tau = nn.Parameter(torch.full((num_muscles,), math.log(24.0)))
@@ -290,6 +300,15 @@ class ExponentialRecovery(nn.Module):
         tau = torch.exp(self.log_tau[muscle_idx])
         decay = torch.exp(-dt_hours / tau)
         return 1.0 - (1.0 - mpc) * decay
+
+    def ordering_penalty(self):
+        """Soft penalty: mean(small τ) < mean(medium τ) < mean(large τ)."""
+        tau = torch.exp(self.log_tau)
+        mean_small = tau[self.SMALL_IDX].mean()
+        mean_medium = tau[self.MEDIUM_IDX].mean()
+        mean_large = tau[self.LARGE_IDX].mean()
+        return (torch.relu(mean_small - mean_medium)
+              + torch.relu(mean_medium - mean_large))
 
 
 class DeepGainModel(nn.Module):
@@ -425,8 +444,13 @@ print("\n" + "=" * 70)
 print("TRAINING")
 print("=" * 70)
 
+TAU_WARMUP = 20  # freeze τ for first N epochs so f learns reasonable drops
+
 for epoch in range(EPOCHS):
     model.train()
+    model.r.log_tau.requires_grad = (epoch >= TAU_WARMUP)
+    if epoch == TAU_WARMUP:
+        print(f"  >>> τ unfrozen at epoch {TAU_WARMUP+1}")
     epoch_loss = 0.0
     epoch_count = 0
     t0 = time.time()
@@ -437,6 +461,7 @@ for epoch in range(EPOCHS):
         rir_pred, _ = model(batch["exercise_idx"], batch["weight"],
                             batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
         loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
+        loss = loss + 0.01 * model.r.ordering_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -472,10 +497,20 @@ for epoch in range(EPOCHS):
     tau_chest = math.exp(model.r.log_tau[0].item())
     recovery_str = f"  r(chest,0.5): " + " | ".join(probe_results) + f" | τ={tau_chest:.1f}h"
 
+    # All τ values
+    tau_strs = []
+    for mi, m in enumerate(ALL_MUSCLES):
+        tau_strs.append(f"{m[:4]}={math.exp(model.r.log_tau[mi].item()):.0f}")
+    tau_all_str = "  τ: " + " | ".join(tau_strs)
+
     print(f"Epoch {epoch+1:3d}/{EPOCHS} | "
           f"Train RMSE: {train_rmse:.2f} RIR | Val RMSE: {val_rmse:.2f} RIR | "
           f"{elapsed:.0f}s", flush=True)
     print(recovery_str, flush=True)
+    print(tau_all_str, flush=True)
+
+    # Save checkpoint every epoch
+    torch.save(model.state_dict(), f"deepgain_model_e{epoch+1}.pt")
 
 # Save model
 torch.save(model.state_dict(), "deepgain_model.pt")
