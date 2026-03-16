@@ -323,6 +323,50 @@ class DeepGainModel(nn.Module):
         self.register_buffer("involvement",
                              torch.tensor(INVOLVEMENT_MATRIX, dtype=torch.float32))
 
+    def fatigue_ordering_penalty(self):
+        """Penalize f when drop ordering doesn't match involvement ordering.
+
+        For each exercise, muscles with higher involvement should have higher
+        raw drops from f. Probes f at a reference point (w=0.4, r=0.27,
+        rir=0.4, mpc=1.0) and penalizes pairwise ordering violations.
+        """
+        device = self.involvement.device
+        penalty = torch.tensor(0.0, device=device)
+        n_pairs = 0
+
+        w = torch.tensor([0.4], dtype=torch.float32, device=device)
+        r = torch.tensor([0.27], dtype=torch.float32, device=device)
+        rir = torch.tensor([0.4], dtype=torch.float32, device=device)
+        mpc = torch.tensor([1.0], dtype=torch.float32, device=device)
+
+        for ei in range(len(ALL_EXERCISES)):
+            inv = self.involvement[ei]  # (M,)
+            involved = (inv > 0).nonzero(as_tuple=True)[0]
+            if len(involved) < 2:
+                continue
+
+            e_embed = self.exercise_embed(torch.tensor([ei], device=device))
+
+            # Get raw drops for each involved muscle
+            drops = []
+            invs = []
+            for mi in involved:
+                m_embed = self.muscle_embed(mi.unsqueeze(0))
+                drop = self.f_net(w, r, rir, mpc, e_embed, m_embed)
+                drops.append(drop)
+                invs.append(inv[mi])
+
+            # Pairwise: if inv[a] > inv[b], then drop[a] should > drop[b]
+            for a in range(len(drops)):
+                for b in range(a + 1, len(drops)):
+                    if invs[a] > invs[b]:
+                        penalty = penalty + torch.relu(drops[b] - drops[a])
+                    elif invs[b] > invs[a]:
+                        penalty = penalty + torch.relu(drops[a] - drops[b])
+                    n_pairs += 1
+
+        return penalty / max(n_pairs, 1)
+
     def forward(self, exercise_idx, weight, reps, rir_target, delta_t, mask):
         B, T = exercise_idx.shape
         M = self.num_muscles
@@ -461,7 +505,7 @@ for epoch in range(EPOCHS):
         rir_pred, _ = model(batch["exercise_idx"], batch["weight"],
                             batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
         loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
-        loss = loss + 0.01 * model.r.ordering_penalty()
+        loss = loss + 0.01 * model.r.ordering_penalty() + 0.01 * model.fatigue_ordering_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
