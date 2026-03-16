@@ -345,23 +345,28 @@ def cross_exercise_penalty(prior_exercises: List[Tuple[str, int, int, float]],
 # ║  [32]-[39] Morán-Navarro, Pareja-Blanco, Belcher, Raastad, McLester   ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
+# Recovery curves for MUSCLE TISSUE (not total performance which includes CNS)
+# Total performance recovers fast (CNS + metabolic clear in hours)
+# Muscle tissue: structural damage takes 24-72h+ to repair
+# Implied τ: upper ~18-22h, lower ~28-36h [32][34][38]
+
 _UPPER_MOD_HOURS  = np.array([0, 6, 12, 24, 36, 48, 72, 96])
-_UPPER_MOD_PERF   = np.array([0.80, 0.93, 0.96, 0.99, 1.00, 1.00, 1.00, 1.00])
+_UPPER_MOD_PERF   = np.array([0.80, 0.84, 0.87, 0.93, 0.97, 0.99, 1.00, 1.00])
 
 _UPPER_HARD_HOURS = np.array([0, 6, 12, 24, 36, 48, 72, 96])
-_UPPER_HARD_PERF  = np.array([0.73, 0.88, 0.92, 0.96, 0.99, 1.00, 1.00, 1.00])
+_UPPER_HARD_PERF  = np.array([0.73, 0.76, 0.80, 0.87, 0.93, 0.97, 1.00, 1.00])
 
 _LOWER_MOD_HOURS  = np.array([0, 6, 12, 24, 36, 48, 72, 96])
-_LOWER_MOD_PERF   = np.array([0.77, 0.91, 0.93, 0.92, 0.95, 0.98, 1.00, 1.00])
+_LOWER_MOD_PERF   = np.array([0.77, 0.79, 0.82, 0.86, 0.90, 0.94, 0.98, 1.00])
 
 _LOWER_HARD_HOURS = np.array([0, 6, 12, 24, 36, 48, 72, 96])
-_LOWER_HARD_PERF  = np.array([0.67, 0.88, 0.90, 0.88, 0.92, 0.95, 0.99, 1.00])
+_LOWER_HARD_PERF  = np.array([0.67, 0.70, 0.73, 0.78, 0.84, 0.90, 0.96, 1.00])
 
 _LOWER_EXTREME_HOURS = np.array([0, 6, 12, 24, 36, 48, 72, 96, 120])
-_LOWER_EXTREME_PERF  = np.array([0.60, 0.82, 0.85, 0.84, 0.88, 0.92, 0.96, 1.00, 1.00])
+_LOWER_EXTREME_PERF  = np.array([0.60, 0.63, 0.66, 0.72, 0.78, 0.85, 0.92, 0.97, 1.00])
 
 _DL_HARD_HOURS = np.array([0, 6, 12, 24, 36, 48, 72])
-_DL_HARD_PERF  = np.array([0.80, 0.93, 0.95, 0.97, 0.99, 1.00, 1.00])
+_DL_HARD_PERF  = np.array([0.80, 0.83, 0.86, 0.91, 0.95, 0.98, 1.00])
 
 
 def session_recovery_multiplier(hours_since: float, body_region: str,
