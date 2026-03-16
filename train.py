@@ -292,7 +292,13 @@ class ExponentialRecovery(nn.Module):
 
     def __init__(self, num_muscles):
         super().__init__()
-        self.log_tau = nn.Parameter(torch.full((num_muscles,), math.log(24.0)))
+        # Initialize τ by muscle size: small=16h, medium=24h, large=32h
+        init_tau = torch.full((num_muscles,), math.log(24.0))
+        for i in self.SMALL_IDX:
+            init_tau[i] = math.log(16.0)
+        for i in self.LARGE_IDX:
+            init_tau[i] = math.log(32.0)
+        self.log_tau = nn.Parameter(init_tau)
 
     def forward(self, mpc, delta_t, muscle_idx):
         """mpc: (N,), delta_t: (N,) normalized, muscle_idx: (N,) long."""
@@ -478,7 +484,10 @@ def evaluate(mdl, loader):
         total_count += n
     return total_loss / total_count
 
-optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
+optimizer = optim.Adam([
+    {'params': [p for n, p in model.named_parameters() if 'log_tau' not in n], 'lr': LR},
+    {'params': [model.r.log_tau], 'lr': LR * 10},  # τ learns 10x faster
+], weight_decay=1e-5)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
 
 train_losses = []
@@ -554,11 +563,11 @@ for epoch in range(EPOCHS):
     print(tau_all_str, flush=True)
 
     # Save checkpoint every epoch
-    torch.save(model.state_dict(), f"deepgain_model_e{epoch+1}.pt")
+    torch.save(model.state_dict(), f"deepgain_model_muscle_ord_e{epoch+1}.pt")
 
 # Save model
-torch.save(model.state_dict(), "deepgain_model.pt")
-print("\nModel saved to deepgain_model.pt")
+torch.save(model.state_dict(), "deepgain_model_muscle_ord.pt")
+print("\nModel saved to deepgain_model_muscle_ord.pt")
 
 # ═══════════════════════════════════════════════════════════════════
 # EVALUATION
