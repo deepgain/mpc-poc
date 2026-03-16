@@ -290,15 +290,32 @@ class ExponentialRecovery(nn.Module):
     MEDIUM_IDX = [0, 1, 4, 5, 9, 14]    # chest, anterior_delts, upper_traps, rhomboids, lats, erectors
     LARGE_IDX  = [10, 11, 12, 13]        # quads, hamstrings, glutes, adductors
 
+    # Literature-derived τ values (hours) — averaged from two deep-research studies
+    # Fixed, not learned. Based on MVC/velocity/torque recovery data from 15+ papers.
+    FIXED_TAU = [
+        16.0,  # chest — Ferreira 2017, Belcher 2019, Bartolomei 2021
+        13.0,  # anterior_delts — bench synergist data
+        9.0,   # lateral_delts — Korak 2015, training frequency data
+        8.0,   # rear_delts — training frequency heuristics
+        9.0,   # upper_traps — fiber type, postural role
+        10.0,  # rhomboids — fiber type, rowing data
+        9.0,   # triceps — Ferreira 2017a, Korak 2015
+        13.0,  # biceps — Soares 2015, Clark 2020
+        13.0,  # brachialis — assumed equal to biceps
+        13.0,  # lats — Soares 2015, Korak 2015
+        19.0,  # quads — Raastad 2000, Pareja-Blanco 2019, Thomas 2018
+        18.0,  # hamstrings — Okazaki 2021, sprint studies
+        15.0,  # glutes — squat/deadlift proxy, reduced eccentric susceptibility
+        12.0,  # adductors — Korak 2015
+        12.0,  # erectors — Belcher 2019 deadlift, fiber type
+        8.0,   # calves — Lievens 2020, soleus fiber type
+    ]
+
     def __init__(self, num_muscles):
         super().__init__()
-        # Initialize τ by muscle size: small=16h, medium=24h, large=32h
-        init_tau = torch.full((num_muscles,), math.log(24.0))
-        for i in self.SMALL_IDX:
-            init_tau[i] = math.log(16.0)
-        for i in self.LARGE_IDX:
-            init_tau[i] = math.log(32.0)
-        self.log_tau = nn.Parameter(init_tau)
+        # Fixed τ from literature — NOT learned
+        init_tau = torch.tensor([math.log(t) for t in self.FIXED_TAU])
+        self.log_tau = nn.Parameter(init_tau, requires_grad=False)
 
     def forward(self, mpc, delta_t, muscle_idx):
         """mpc: (N,), delta_t: (N,) normalized, muscle_idx: (N,) long."""
@@ -485,8 +502,7 @@ def evaluate(mdl, loader):
     return total_loss / total_count
 
 optimizer = optim.Adam([
-    {'params': [p for n, p in model.named_parameters() if 'log_tau' not in n], 'lr': LR},
-    {'params': [model.r.log_tau], 'lr': LR},  # same LR, recovery weighting provides signal
+    {'params': [p for p in model.parameters() if p.requires_grad], 'lr': LR},
 ], weight_decay=1e-5)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
 
@@ -494,16 +510,11 @@ train_losses = []
 val_losses = []
 
 print("\n" + "=" * 70)
-print("TRAINING")
+print("TRAINING (τ fixed from literature)")
 print("=" * 70)
-
-TAU_WARMUP = 0  # no freeze — ordering penalty keeps τ in check
 
 for epoch in range(EPOCHS):
     model.train()
-    model.r.log_tau.requires_grad = (epoch >= TAU_WARMUP)
-    if epoch == TAU_WARMUP:
-        print(f"  >>> τ unfrozen at epoch {TAU_WARMUP+1}")
     epoch_loss = 0.0
     epoch_count = 0
     t0 = time.time()
@@ -513,13 +524,8 @@ for epoch in range(EPOCHS):
         optimizer.zero_grad()
         rir_pred, _ = model(batch["exercise_idx"], batch["weight"],
                             batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
-        # Recovery-weighted loss: sets after longer rest get 20x more weight
-        # This gives τ enough gradient signal to learn proper recovery rates
-        dt_hours = torch.expm1(batch["delta_t"] * DT_SCALE)
-        recovery_weights = 1.0 + 19.0 * (dt_hours / 24.0).clamp(0, 1)
-        weighted_diff = (rir_pred - batch["rir"]) ** 2 * recovery_weights * batch["mask"]
-        loss = weighted_diff.sum() / (recovery_weights * batch["mask"]).sum()
-        loss = loss + 0.01 * model.r.ordering_penalty() + 0.01 * model.fatigue_ordering_penalty()
+        loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
+        loss = loss + 0.01 * model.fatigue_ordering_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
