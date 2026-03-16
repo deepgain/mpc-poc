@@ -486,7 +486,7 @@ def evaluate(mdl, loader):
 
 optimizer = optim.Adam([
     {'params': [p for n, p in model.named_parameters() if 'log_tau' not in n], 'lr': LR},
-    {'params': [model.r.log_tau], 'lr': LR * 10},  # τ learns 10x faster
+    {'params': [model.r.log_tau], 'lr': LR},  # same LR, recovery weighting provides signal
 ], weight_decay=1e-5)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
 
@@ -513,7 +513,12 @@ for epoch in range(EPOCHS):
         optimizer.zero_grad()
         rir_pred, _ = model(batch["exercise_idx"], batch["weight"],
                             batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
-        loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
+        # Recovery-weighted loss: sets after longer rest get 20x more weight
+        # This gives τ enough gradient signal to learn proper recovery rates
+        dt_hours = torch.expm1(batch["delta_t"] * DT_SCALE)
+        recovery_weights = 1.0 + 19.0 * (dt_hours / 24.0).clamp(0, 1)
+        weighted_diff = (rir_pred - batch["rir"]) ** 2 * recovery_weights * batch["mask"]
+        loss = weighted_diff.sum() / (recovery_weights * batch["mask"]).sum()
         loss = loss + 0.01 * model.r.ordering_penalty() + 0.01 * model.fatigue_ordering_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
