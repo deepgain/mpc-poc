@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """DeepGain — Train f, g, r networks from training_data.csv (RIR-based, v3)"""
 
+import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -272,23 +273,23 @@ class RIRNet(nn.Module):
         return torch.sigmoid(raw)
 
 
-class RecoveryNet(nn.Module):
-    """r: predicts recovered MPC — no constraints, learned from data."""
-    def __init__(self, embed_dim, hidden_dim):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(2 + embed_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1),
-        )
+class ExponentialRecovery(nn.Module):
+    """r_m: MPC recovers toward 1.0 with learned per-muscle τ_m.
 
-    def forward(self, mpc, delta_t, m_embed):
-        x = torch.cat([mpc.unsqueeze(-1), delta_t.unsqueeze(-1), m_embed], dim=-1)
-        return torch.sigmoid(self.net(x).squeeze(-1))
+    r(MPC, Δt, muscle) = 1 - (1 - MPC) · exp(-Δt / τ_m)
+
+    Path-consistent by construction. 16 learnable parameters.
+    """
+    def __init__(self, num_muscles):
+        super().__init__()
+        self.log_tau = nn.Parameter(torch.full((num_muscles,), math.log(24.0)))
+
+    def forward(self, mpc, delta_t, muscle_idx):
+        """mpc: (N,), delta_t: (N,) normalized, muscle_idx: (N,) long."""
+        dt_hours = torch.expm1(delta_t * DT_SCALE)
+        tau = torch.exp(self.log_tau[muscle_idx])
+        decay = torch.exp(-dt_hours / tau)
+        return 1.0 - (1.0 - mpc) * decay
 
 
 class DeepGainModel(nn.Module):
@@ -299,7 +300,7 @@ class DeepGainModel(nn.Module):
         self.muscle_embed = nn.Embedding(num_muscles, embed_dim)
         self.f_net = FatigueNet(embed_dim, hidden_dim)
         self.g_net = RIRNet(embed_dim, hidden_dim, num_muscles)
-        self.r_net = RecoveryNet(embed_dim, hidden_dim)
+        self.r = ExponentialRecovery(num_muscles)
         self.register_buffer("involvement",
                              torch.tensor(INVOLVEMENT_MATRIX, dtype=torch.float32))
 
@@ -315,14 +316,15 @@ class DeepGainModel(nn.Module):
         all_m_embed = self.muscle_embed(all_m_idx)
         all_m_embed_expanded = all_m_embed.unsqueeze(0).expand(B, -1, -1)
         E = all_m_embed.shape[-1]
+        # Muscle indices for recovery: (B*M,) repeating [0,1,...,15] for each batch
+        m_idx_flat = all_m_idx.unsqueeze(0).expand(B, -1).reshape(-1)
 
         for t in range(T):
             if t > 0:
                 dt = delta_t[:, t]
                 dt_exp = dt.unsqueeze(1).expand(-1, M).reshape(-1)
                 mpc_flat = mpc.reshape(-1)
-                m_emb_flat = all_m_embed_expanded.reshape(-1, E)
-                mpc = self.r_net(mpc_flat, dt_exp, m_emb_flat).reshape(B, M)
+                mpc = self.r(mpc_flat, dt_exp, m_idx_flat).reshape(B, M)
 
             e_idx = exercise_idx[:, t]
             e_embed = self.exercise_embed(e_idx)
@@ -358,14 +360,14 @@ class DeepGainModel(nn.Module):
         all_m_embed = self.muscle_embed(all_m_idx)
         all_m_embed_expanded = all_m_embed.unsqueeze(0)
         E = all_m_embed.shape[-1]
+        m_idx_flat = all_m_idx.unsqueeze(0).reshape(-1)
 
         for t in range(T):
             if t > 0:
                 dt = delta_t[:, t]
                 dt_exp = dt.unsqueeze(1).expand(-1, M).reshape(-1)
                 mpc_flat = mpc.reshape(-1)
-                m_emb_flat = all_m_embed_expanded.reshape(-1, E)
-                mpc = self.r_net(mpc_flat, dt_exp, m_emb_flat).reshape(1, M)
+                mpc = self.r(mpc_flat, dt_exp, m_idx_flat).reshape(1, M)
 
             e_idx = exercise_idx[:, t]
             e_embed = self.exercise_embed(e_idx)
@@ -460,14 +462,15 @@ for epoch in range(EPOCHS):
 
     # Recovery probe: chest (idx 0) at MPC=0.5, sweep 2h/12h/48h
     with torch.no_grad():
-        chest_embed = model.muscle_embed(torch.tensor([0], device=DEVICE))
         probe_results = []
         for dt_h in [2.0, 12.0, 48.0]:
             dt_norm = torch.tensor([np.log1p(dt_h) / DT_SCALE], dtype=torch.float32, device=DEVICE)
             mpc_in = torch.tensor([0.5], dtype=torch.float32, device=DEVICE)
-            mpc_out = model.r_net(mpc_in, dt_norm, chest_embed).item()
+            m_idx = torch.tensor([0], dtype=torch.long, device=DEVICE)  # chest
+            mpc_out = model.r(mpc_in, dt_norm, m_idx).item()
             probe_results.append(f"{dt_h:.0f}h→{mpc_out:.3f}")
-    recovery_str = "  r(chest,0.5): " + " | ".join(probe_results)
+    tau_chest = math.exp(model.r.log_tau[0].item())
+    recovery_str = f"  r(chest,0.5): " + " | ".join(probe_results) + f" | τ={tau_chest:.1f}h"
 
     print(f"Epoch {epoch+1:3d}/{EPOCHS} | "
           f"Train RMSE: {train_rmse:.2f} RIR | Val RMSE: {val_rmse:.2f} RIR | "
@@ -655,19 +658,19 @@ fig, ax = plt.subplots(figsize=(12, 6))
 
 with torch.no_grad():
     for mi in range(NUM_MUSCLES):
-        m_embed = model.muscle_embed(torch.tensor([mi], device=DEVICE))
-        m_embed_exp = m_embed.expand(len(dt_normalized), -1)
+        m_idx = torch.full((len(dt_normalized),), mi, dtype=torch.long, device=DEVICE)
         mpc_start = torch.full((len(dt_normalized),), 0.5, device=DEVICE)
         dt_tensor = torch.tensor(dt_normalized, dtype=torch.float32, device=DEVICE)
-        recovered = model.r_net(mpc_start, dt_tensor, m_embed_exp).cpu().numpy()
-        ax.plot(dt_hours, recovered, label=ALL_MUSCLES[mi].replace("_", " "),
+        recovered = model.r(mpc_start, dt_tensor, m_idx).cpu().numpy()
+        tau = math.exp(model.r.log_tau[mi].item())
+        ax.plot(dt_hours, recovered, label=f"{ALL_MUSCLES[mi].replace('_', ' ')} (τ={tau:.0f}h)",
                 color=muscle_colors[mi], linewidth=1.5, alpha=0.8)
 
 ax.axhline(y=1.0, color="gray", linestyle=":", alpha=0.5)
 ax.axhline(y=0.5, color="gray", linestyle=":", alpha=0.5)
 ax.set_xlabel("Time (hours)")
 ax.set_ylabel("MPC")
-ax.set_title("Learned Recovery Curves (starting MPC = 0.5)")
+ax.set_title("Learned Recovery Curves (starting MPC = 0.5) — Exponential τ per muscle")
 ax.legend(fontsize=7, ncol=4, loc="lower right")
 ax.set_ylim(0.4, 1.05)
 ax.grid(True, alpha=0.3)
