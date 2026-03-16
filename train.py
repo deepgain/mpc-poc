@@ -444,7 +444,7 @@ print("\n" + "=" * 70)
 print("TRAINING")
 print("=" * 70)
 
-TAU_WARMUP = 20  # freeze τ for first N epochs so f learns reasonable drops
+TAU_WARMUP = 0  # no freeze — ordering penalty keeps τ in check
 
 for epoch in range(EPOCHS):
     model.train()
