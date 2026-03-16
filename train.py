@@ -103,7 +103,7 @@ df["exercise_idx"] = df["exercise_idx"].astype(int)
 
 # ── CURRICULUM: focus on specific muscles ──
 # Set to None to train on everything, or list target muscles
-FOCUS_MUSCLES = ["chest", "triceps"]
+FOCUS_MUSCLES = None  # train on all muscles
 # FOCUS_MUSCLES = None  # uncomment for all muscles
 
 if FOCUS_MUSCLES:
