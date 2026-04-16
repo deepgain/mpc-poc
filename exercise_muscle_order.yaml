@@ -1,0 +1,50 @@
+# DeepGain — Exercise Muscle Order (Milestone 2)
+# ──────────────────────────────────────────────────────────────────────────────
+# One source of truth for ordinal muscle involvement across the whole team.
+#
+# ORDINAL TIERS (per-set MPC drop sampled uniformly from range):
+#   primary:   U[0.70, 1.00]  — dominant mover, highest EMG activation
+#   secondary: U[0.30, 0.60]  — significant synergist
+#   tertiary:  U[0.05, 0.20]  — stabilizer / minor synergist
+#
+# KEY RULES:
+#   • root key (e.g. bench_press) == snake_case ID used in CSV column `exercise`
+#   • category: compound | accessory | isolation | core
+#   • all muscle names must exist in ALL_MUSCLES (train.py)
+#
+# EMG SOURCES:
+#   Rodríguez-Ridao 2020 (bench), Escamilla 2002 (squat/DL),
+#   Martín-Fuentes 2020 (deadlift), Saeterbakken 2011 (OHP/bench)
+# ──────────────────────────────────────────────────────────────────────────────
+
+exercises:
+
+  bench_press:
+    name_en: "Bench Press"
+    name_pl: "Wyciskanie sztangi poziomo"
+    category: compound
+    # Rodríguez-Ridao 2020: pectoralis major highest EMG (mean 94% MVIC),
+    # then anterior deltoid, then triceps brachii
+    primary_muscles: [chest]
+    secondary_muscles: [anterior_delts, triceps]
+    tertiary_muscles: []
+
+  squat:
+    name_en: "High Bar Squat"
+    name_pl: "Przysiad ze sztangą (wysoko)"
+    category: compound
+    # Escamilla 2002: vastus lateralis/medialis dominant; glutes & erectors
+    # as primary stabilisers; adductors and hamstrings synergists
+    primary_muscles: [quads]
+    secondary_muscles: [glutes, erectors, adductors]
+    tertiary_muscles: [hamstrings]
+
+  deadlift:
+    name_en: "Deadlift (Conventional)"
+    name_pl: "Martwy ciąg konwencjonalny"
+    category: compound
+    # Martín-Fuentes 2020, Escamilla 2002: erector spinae & gluteus maximus
+    # highest EMG; hamstrings + upper traps secondary; quads/lats/adductors minor
+    primary_muscles: [erectors, glutes]
+    secondary_muscles: [hamstrings, upper_traps, adductors]
+    tertiary_muscles: [quads, lats]

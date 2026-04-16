@@ -114,15 +114,24 @@ LOAD-VELOCITY:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import os
+import pathlib
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+try:
+    import yaml as _yaml
+    _YAML_AVAILABLE = True
+except ImportError:
+    _YAML_AVAILABLE = False
+    print("WARNING: PyYAML not installed — run: pip install pyyaml")
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
@@ -291,6 +300,93 @@ EXERCISE_MUSCLES: Dict[str, Dict[str, float]] = {
 
 ALL_EXERCISES = list(EXERCISE_MUSCLES.keys())
 ALL_MUSCLES = sorted(set(m for ex in EXERCISE_MUSCLES.values() for m in ex))
+
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ORDINAL MUSCLE INVOLVEMENT — Milestone 2                              ║
+# ║  Loaded from exercise_muscle_order.yaml; overrides EXERCISE_MUSCLES    ║
+# ║  for YAML-defined exercises with tier-derived numerical weights.       ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+# Numerical proxies used for cosine-overlap computation (muscle_overlap fn).
+# Values chosen so tier hierarchy is preserved and gaps are meaningful.
+_TIER_WEIGHTS: Dict[str, float] = {
+    "primary":   1.00,
+    "secondary": 0.45,
+    "tertiary":  0.15,
+}
+
+# Per-set MPC drop ranges sampled uniformly [Milestone 2 spec]
+FATIGUE_DROP_RANGES: Dict[str, Tuple[float, float]] = {
+    "primary":   (0.70, 1.00),
+    "secondary": (0.30, 0.60),
+    "tertiary":  (0.05, 0.20),
+}
+
+# Populated by load_exercise_yaml(); maps exercise → {muscle → tier str}
+ORDINAL_MUSCLES: Dict[str, Dict[str, str]] = {}
+
+_DEFAULT_YAML_PATH = pathlib.Path(__file__).parent / "exercise_muscle_order.yaml"
+
+
+def load_exercise_yaml(path: Optional[str] = None) -> None:
+    """Load exercise_muscle_order.yaml and populate ORDINAL_MUSCLES.
+
+    Also patches EXERCISE_MUSCLES in-place for YAML-defined exercises,
+    replacing numerical weights with ordinal-derived approximations so
+    that muscle_overlap / cross_exercise_penalty remain consistent.
+    """
+    global ORDINAL_MUSCLES
+    if not _YAML_AVAILABLE:
+        return
+    p = pathlib.Path(path) if path else _DEFAULT_YAML_PATH
+    if not p.exists():
+        print(f"  WARNING: YAML not found at {p}. Using hardcoded EXERCISE_MUSCLES.")
+        return
+
+    with p.open("r", encoding="utf-8") as fh:
+        data = _yaml.safe_load(fh)
+
+    exercises: Dict[str, Any] = data.get("exercises", {})
+    for ex_key, ex_data in exercises.items():
+        tier_map: Dict[str, str] = {}
+        for tier in ("primary", "secondary", "tertiary"):
+            for muscle in ex_data.get(f"{tier}_muscles", []):
+                tier_map[muscle] = tier
+        ORDINAL_MUSCLES[ex_key] = tier_map
+
+        # Patch EXERCISE_MUSCLES so downstream overlap math uses tier weights
+        EXERCISE_MUSCLES[ex_key] = {
+            muscle: _TIER_WEIGHTS[t] for muscle, t in tier_map.items()
+        }
+
+    print(f"  Loaded ordinal muscles for {len(ORDINAL_MUSCLES)} exercises "
+          f"from {p.name}: {', '.join(ORDINAL_MUSCLES)}")
+
+
+def fatigue_drop_for_muscle(exercise: str, muscle: str,
+                             rng: np.random.Generator) -> float:
+    """Sample a per-set MPC drop for (exercise, muscle) from its ordinal tier.
+
+    Returns a float in [0.05, 1.0].  Falls back to secondary range when the
+    (exercise, muscle) pair is not defined in ORDINAL_MUSCLES.
+
+    Usage by train.py (Osoba B):
+        drop = fatigue_drop_for_muscle("bench_press", "chest", rng)
+        # drop ~ U[0.70, 1.00]
+    """
+    tier = ORDINAL_MUSCLES.get(exercise, {}).get(muscle)
+    if tier is None:
+        # Derive tier from position in EXERCISE_MUSCLES (legacy exercises)
+        muscles_dict = EXERCISE_MUSCLES.get(exercise, {})
+        if muscles_dict:
+            ranked = sorted(muscles_dict, key=muscles_dict.get, reverse=True)
+            idx = ranked.index(muscle) if muscle in ranked else len(ranked)
+            tier = "primary" if idx == 0 else "secondary" if idx < 3 else "tertiary"
+        else:
+            tier = "secondary"
+    lo, hi = FATIGUE_DROP_RANGES[tier]
+    return float(rng.uniform(lo, hi))
 
 
 def muscle_overlap(ex_a: str, ex_b: str) -> float:
@@ -793,6 +889,28 @@ SCHEDULES: List[Schedule] = [
         deload_days=("deload_upper","deload_lower",None,None,None,None,None)),
 ]
 
+# ── MINI TEMPLATES (MVP: bench_press, squat, deadlift only) ────────────────
+# Used by --mini mode.  3-day upper/lower/posterior split.
+MINI_TEMPLATES: Dict[str, List[WorkoutEntry]] = {
+    "mini_bench_vol":   [("bench_press", 0.75, 4, 2, 1.1)],
+    "mini_bench_str":   [("bench_press", 0.87, 5, 1, 1.5)],
+    "mini_squat":       [("squat",       0.78, 4, 2, 1.3)],
+    "mini_deadlift":    [("deadlift",    0.80, 3, 2, 1.5)],
+    "mini_deload_upper":[("bench_press", 0.62, 3, 4, 1.0)],
+    "mini_deload_lower":[("squat",       0.62, 3, 4, 1.2)],
+}
+MINI_SCHEDULE = Schedule(
+    name="MINI_3",
+    days=(
+        "mini_bench_vol", "mini_squat", None,
+        "mini_bench_str", "mini_deadlift", None, None,
+    ),
+    deload_days=(
+        "mini_deload_upper", "mini_deload_lower", None,
+        None, None, None, None,
+    ),
+)
+
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  WARM-UP GENERATOR [44][45][46]                                        ║
@@ -967,9 +1085,12 @@ def update_muscle_history(user: UserProfile, exercise: str,
 def simulate_workout(rng: np.random.Generator, user: UserProfile,
                      template_name: str, start_time: datetime,
                      week_in_meso: int,
-                     include_warmups: bool = True) -> List[Dict]:
+                     include_warmups: bool = True,
+                     templates: Optional[Dict[str, List[WorkoutEntry]]] = None,
+                     ) -> List[Dict]:
     """Generate all sets for one workout session."""
-    template = TEMPLATES[template_name]
+    _templates = templates if templates is not None else TEMPLATES
+    template = _templates[template_name]
     rows: List[Dict] = []
     t = start_time
     daily_mult = daily_1rm_multiplier(rng, user.daily_cv)
@@ -1072,14 +1193,22 @@ def simulate_workout(rng: np.random.Generator, user: UserProfile,
 
 def simulate_program(rng: np.random.Generator, user: UserProfile,
                      n_weeks: int, start_date: datetime,
-                     include_warmups: bool = True) -> List[Dict]:
+                     include_warmups: bool = True,
+                     templates: Optional[Dict[str, List[WorkoutEntry]]] = None,
+                     fixed_schedule: Optional[Schedule] = None,
+                     ) -> List[Dict]:
     """Generate n_weeks of training for one user. [53]"""
-    schedule_idx = rng.integers(len(SCHEDULES))
-    schedule = SCHEDULES[schedule_idx]
+    _templates = templates if templates is not None else TEMPLATES
+    _schedules = SCHEDULES
 
-    # Handle program switch mid-year
-    alt_schedule_idx = (schedule_idx + rng.integers(1, len(SCHEDULES))) % len(SCHEDULES)
-    alt_schedule = SCHEDULES[alt_schedule_idx]
+    if fixed_schedule is not None:
+        schedule = fixed_schedule
+        alt_schedule = fixed_schedule
+    else:
+        schedule_idx = rng.integers(len(_schedules))
+        schedule = _schedules[schedule_idx]
+        alt_schedule_idx = (schedule_idx + rng.integers(1, len(_schedules))) % len(_schedules)
+        alt_schedule = _schedules[alt_schedule_idx]
 
     all_rows: List[Dict] = []
     current_date = start_date
@@ -1090,7 +1219,7 @@ def simulate_program(rng: np.random.Generator, user: UserProfile,
 
         # Switch programs if applicable
         active_schedule = schedule
-        if user.program_switch_week and week_idx >= user.program_switch_week:
+        if fixed_schedule is None and user.program_switch_week and week_idx >= user.program_switch_week:
             active_schedule = alt_schedule
 
         for day_idx in range(7):
@@ -1120,7 +1249,8 @@ def simulate_program(rng: np.random.Generator, user: UserProfile,
             session_start = current_date.replace(hour=hour, minute=minute)
 
             workout_rows = simulate_workout(
-                rng, user, template, session_start, week_in_meso, include_warmups
+                rng, user, template, session_start, week_in_meso,
+                include_warmups, _templates,
             )
             all_rows.extend(workout_rows)
             current_date += timedelta(days=1)
@@ -1142,29 +1272,73 @@ def simulate_program(rng: np.random.Generator, user: UserProfile,
 # ║  DATASET GENERATOR                                                     ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
-def generate_dataset(n_users: int = 200, n_weeks: int = 52,
-                     seed: int = 42, include_warmups: bool = True) -> pd.DataFrame:
-    """Generate the full synthetic dataset."""
+def _user_in_val(user_id: str, val_ratio: float, seed: int) -> bool:
+    """Deterministic train/val split by user_id hash. No data leakage.
+
+    Uses MD5 of (seed, user_id) so assignment is stable across runs
+    regardless of generation order.
+    """
+    digest = hashlib.md5(f"{seed}:{user_id}".encode()).hexdigest()
+    bucket = int(digest[:8], 16) % 10_000
+    return bucket < int(val_ratio * 10_000)
+
+
+def generate_dataset(
+    n_users: int = 200,
+    n_weeks: int = 52,
+    seed: int = 42,
+    include_warmups: bool = True,
+    yaml_path: Optional[str] = None,
+    mini: bool = False,
+    val_ratio: float = 0.20,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Generate the full synthetic dataset.
+
+    Returns:
+        (train_df, val_df) split at user level (no leakage).
+        mini=True: 5 users × 4 weeks, only YAML-defined exercises.
+    """
+    # Load YAML (idempotent if already loaded)
+    load_exercise_yaml(yaml_path)
+
+    if mini:
+        n_users = min(n_users, 5)
+        n_weeks = min(n_weeks, 4)
+
     rng = np.random.default_rng(seed)
     start_date = datetime(2024, 1, 1)
     all_rows: List[Dict] = []
     report_every = max(1, n_users // 20)
 
+    templates = MINI_TEMPLATES if mini else None
+    fixed_schedule = MINI_SCHEDULE if mini else None
+
     for i in range(n_users):
         if i % report_every == 0:
             print(f"\r  Users: {i:,}/{n_users:,} ({i/n_users*100:.0f}%)",
                   end="", flush=True)
-        user = generate_user(rng, f"user_{i:05d}")
-        rows = simulate_program(rng, user, n_weeks, start_date, include_warmups)
+        user_id = f"user_{i:05d}"
+        user = generate_user(rng, user_id)
+        rows = simulate_program(
+            rng, user, n_weeks, start_date, include_warmups,
+            templates=templates, fixed_schedule=fixed_schedule,
+        )
         all_rows.extend(rows)
 
     print(f"\r  Users: {n_users:,}/{n_users:,} (100%)    ")
 
     df = pd.DataFrame(all_rows)
     if len(df) == 0:
-        return df
+        empty = pd.DataFrame(columns=["user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"])
+        return empty, empty
+
     df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
-    return df
+
+    # Train / val split — by user hash, not by row order
+    val_mask = df["user_id"].apply(lambda uid: _user_in_val(uid, val_ratio, seed))
+    train_df = df[~val_mask].reset_index(drop=True)
+    val_df   = df[val_mask].reset_index(drop=True)
+    return train_df, val_df
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
@@ -1377,50 +1551,108 @@ def main():
         description="DeepGain v3 — Empirical, MPC-Free, RIR-Based Data Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  Quick test:      python generate_training_data.py --num_users 10 --weeks 4
-  Medium:          python generate_training_data.py --num_users 100 --weeks 16
-  Full year:       python generate_training_data.py --num_users 200 --weeks 52
-  Large:           python generate_training_data.py --num_users 500 --weeks 52
+  Mini (MVP, 3 exercises):
+      python generate_training_data.py --mini
+  Quick test:
+      python generate_training_data.py --num_users 10 --weeks 4
+  Full year + split:
+      python generate_training_data.py --num_users 200 --weeks 52
         """)
-    p.add_argument("--num_users", type=int, default=200)
-    p.add_argument("--weeks", type=int, default=52)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--output", type=str, default="training_data.csv")
-    p.add_argument("--no_warmups", action="store_true")
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--num_users",    type=int,   default=200)
+    p.add_argument("--weeks",        type=int,   default=52)
+    p.add_argument("--seed",         type=int,   default=42)
+    p.add_argument("--output",       type=str,   default="training_data.csv",
+                   help="Legacy single-file output (ignored when --split is set).")
+    p.add_argument("--train_output", type=str,   default="training_data_train.csv")
+    p.add_argument("--val_output",   type=str,   default="training_data_val.csv")
+    p.add_argument("--val_ratio",    type=float, default=0.20,
+                   help="Fraction of users in val set (default 0.20).")
+    p.add_argument("--yaml",         type=str,   default=None,
+                   help="Path to exercise_muscle_order.yaml "
+                        "(default: same directory as this script).")
+    p.add_argument("--mini",         action="store_true",
+                   help="Mini-dataset MVP: 5 users × 4 weeks, YAML exercises only. "
+                        "Useful for Osoba B early pipeline test.")
+    p.add_argument("--no_warmups",   action="store_true")
+    p.add_argument("--quiet",        action="store_true")
+    p.add_argument("--split",        action="store_true",
+                   help="Write separate train/val CSV files (default when --mini).")
     args = p.parse_args()
+
+    split = args.split or args.mini
 
     print("=" * 60)
     print("DeepGain v3 — Empirical, MPC-Free, RIR-Based Generator")
+    if args.mini:
+        print("  *** MINI / MVP MODE (3 exercises, 5 users, 4 weeks) ***")
     print("=" * 60)
-    print(f"  Scientific sources:  57 papers")
-    print(f"  Exercises:           {len(EXERCISE_MUSCLES)}")
-    print(f"  Muscle groups:       {len(ALL_MUSCLES)}")
-    print(f"  Workout templates:   {len(TEMPLATES)}")
-    print(f"  Weekly schedules:    {len(SCHEDULES)}")
-    print(f"  Users:               {args.num_users:,}")
-    print(f"  Weeks:               {args.weeks}")
-    print(f"  Effort metric:       RIR (0-5, integer)")
-    print(f"  Hidden state:        NONE (pure lookup tables)")
+    print(f"  Users:        {min(args.num_users, 5) if args.mini else args.num_users:,}")
+    print(f"  Weeks:        {min(args.weeks, 4) if args.mini else args.weeks}")
+    print(f"  Val ratio:    {args.val_ratio:.0%}")
+    print(f"  Output mode:  {'train+val CSV' if split else 'single CSV'}")
     print()
 
-    df = generate_dataset(args.num_users, args.weeks, args.seed,
-                          include_warmups=not args.no_warmups)
+    train_df, val_df = generate_dataset(
+        n_users=args.num_users,
+        n_weeks=args.weeks,
+        seed=args.seed,
+        include_warmups=not args.no_warmups,
+        yaml_path=args.yaml,
+        mini=args.mini,
+        val_ratio=args.val_ratio,
+    )
 
-    if len(df) == 0:
+    if len(train_df) == 0:
         print("ERROR: No data generated!")
         sys.exit(1)
 
     expected = {"user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"}
-    assert set(df.columns) == expected, f"Bad columns: {set(df.columns)}"
+    assert set(train_df.columns) == expected, f"Bad columns: {set(train_df.columns)}"
 
-    if not args.quiet:
-        print_diagnostics(df)
-        validate_empirical_patterns(df)
+    df_all = pd.concat([train_df, val_df]).sort_values(["user_id", "timestamp"])
 
-    df.to_csv(args.output, index=False)
-    size_mb = os.path.getsize(args.output) / 1024 / 1024
-    print(f"\nSaved {len(df):,} rows to {args.output} ({size_mb:.1f} MB)")
+    if not args.quiet and not args.mini:
+        print_diagnostics(df_all)
+        validate_empirical_patterns(df_all)
+    elif args.mini and not args.quiet:
+        _print_mini_diagnostics(train_df, val_df)
+
+    if split:
+        train_df.to_csv(args.train_output, index=False)
+        val_df.to_csv(args.val_output, index=False)
+        t_mb = os.path.getsize(args.train_output) / 1024 / 1024
+        v_mb = os.path.getsize(args.val_output)   / 1024 / 1024
+        print(f"\nSaved train: {len(train_df):,} rows -> {args.train_output} ({t_mb:.2f} MB)")
+        print(f"Saved val:   {len(val_df):,} rows -> {args.val_output} ({v_mb:.2f} MB)")
+        print(f"Train users: {train_df['user_id'].nunique()}  "
+              f"Val users: {val_df['user_id'].nunique()}")
+    else:
+        df_all.to_csv(args.output, index=False)
+        size_mb = os.path.getsize(args.output) / 1024 / 1024
+        print(f"\nSaved {len(df_all):,} rows to {args.output} ({size_mb:.1f} MB)")
+
+
+def _print_mini_diagnostics(train_df: pd.DataFrame, val_df: pd.DataFrame) -> None:
+    """Compact diagnostic for --mini mode."""
+    df = pd.concat([train_df, val_df])
+    sep = "-" * 50
+    print(f"\n{sep}")
+    print("MINI-DATASET DIAGNOSTIC")
+    print(sep)
+    print(f"  Total sets:  {len(df):,}   "
+          f"(train {len(train_df):,} / val {len(val_df):,})")
+    print(f"  Users:       {df['user_id'].nunique()}")
+    print(f"  Exercises:   {sorted(df['exercise'].unique())}")
+    print(f"  Date range:  {df['timestamp'].min()[:10]} to {df['timestamp'].max()[:10]}")
+    print("\n  Sets per exercise:")
+    for ex, cnt in df.groupby('exercise').size().items():
+        print(f"    {ex:<30} {cnt:>5}")
+    print("\n  RIR distribution:")
+    for r in range(6):
+        c = (df['rir'] == r).sum()
+        print(f"    RIR {r}: {c:>4} ({c/len(df)*100:4.1f}%)")
+    print(f"\n  Ordinal muscles loaded: {list(ORDINAL_MUSCLES.keys())}")
+    print(sep)
 
 
 if __name__ == "__main__":
