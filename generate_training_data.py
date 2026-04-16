@@ -340,6 +340,41 @@ FATIGUE_DROP_RANGES: Dict[str, Tuple[float, float]] = {
 ORDINAL_MUSCLES: Dict[str, Dict[str, str]] = {}
 
 _DEFAULT_YAML_PATH = pathlib.Path(__file__).parent / "exercise_muscle_order.yaml"
+_SCALED_WEIGHTS_PATH = pathlib.Path(__file__).parent / "exercise_muscle_weights_scaled.csv"
+
+
+def _load_scaled_exercise_weights(path: pathlib.Path) -> Dict[str, Dict[str, float]]:
+    """Load per-exercise muscle weights in [0,1] from CSV.
+
+    Expected columns:
+      - exercise_id
+      - one column per muscle id (e.g. chest, quads, abs)
+    """
+    if not path.exists():
+        return {}
+    try:
+        df = pd.read_csv(path)
+    except Exception as exc:
+        print(f"  WARNING: could not read scaled weights CSV {path.name}: {exc}")
+        return {}
+
+    if "exercise_id" not in df.columns:
+        print(f"  WARNING: {path.name} has no 'exercise_id' column.")
+        return {}
+
+    weights: Dict[str, Dict[str, float]] = {}
+    for _, row in df.iterrows():
+        ex_id = str(row["exercise_id"])
+        ex_weights: Dict[str, float] = {}
+        for col in df.columns:
+            if col in {"exercise_id", "csv_title", "source", "per_exercise_max_after_clip", "global_clip_p99"}:
+                continue
+            val = float(row[col])
+            if val > 0.0:
+                ex_weights[col] = float(np.clip(val, 0.0, 1.0))
+        if ex_weights:
+            weights[ex_id] = ex_weights
+    return weights
 
 
 def load_exercise_yaml(path: Optional[str] = None) -> None:
@@ -364,6 +399,10 @@ def load_exercise_yaml(path: Optional[str] = None) -> None:
     ORDINAL_MUSCLES = {}
     yaml_exercise_muscles: Dict[str, Dict[str, float]] = {}
 
+    scaled_weights = _load_scaled_exercise_weights(_SCALED_WEIGHTS_PATH)
+    scaled_used = 0
+    tier_fallback_used = 0
+
     for ex_key, ex_data in exercises.items():
         tier_map: Dict[str, str] = {}
         for tier in ("primary", "secondary", "tertiary"):
@@ -371,9 +410,14 @@ def load_exercise_yaml(path: Optional[str] = None) -> None:
                 tier_map[muscle] = tier
         ORDINAL_MUSCLES[ex_key] = tier_map
 
-        yaml_exercise_muscles[ex_key] = {
-            muscle: _TIER_WEIGHTS[t] for muscle, t in tier_map.items()
-        }
+        if ex_key in scaled_weights:
+            yaml_exercise_muscles[ex_key] = scaled_weights[ex_key]
+            scaled_used += 1
+        else:
+            yaml_exercise_muscles[ex_key] = {
+                muscle: _TIER_WEIGHTS[t] for muscle, t in tier_map.items()
+            }
+            tier_fallback_used += 1
 
     # Keep only YAML-defined exercises so data generation cannot drift.
     EXERCISE_MUSCLES.clear()
@@ -382,6 +426,10 @@ def load_exercise_yaml(path: Optional[str] = None) -> None:
 
     print(f"  Loaded ordinal muscles for {len(ORDINAL_MUSCLES)} exercises "
           f"from {p.name}: {', '.join(ORDINAL_MUSCLES)}")
+    print(
+        f"  Numeric weights source: scaled_csv={scaled_used}, "
+        f"tier_fallback={tier_fallback_used}"
+    )
 
 
 def fatigue_drop_for_muscle(exercise: str, muscle: str,
