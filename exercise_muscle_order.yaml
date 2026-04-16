@@ -1,0 +1,370 @@
+# DeepGain - Exercise Muscle Order (Milestone 2)
+#
+# Ten plik jest jednym zrodel prawdy dla:
+# - exercise_id
+# - nazw EN / PL
+# - kategorii cwiczen
+# - kolejnosci zaangazowania miesni
+#
+# Kolejnosc miesni jest zsynchronizowana z finalnym plikiem:
+# `Ratios - Arkusz1.csv`
+# i opiera sie na wartosciach zagregowanych do tych samych grup miesni,
+# ktorych uzywa model:
+# - chest = klatka gora + klatka srodek/dol
+# - erectors = prostownik ledzwiowy + multifidus
+# - glutes = posladkowy wielki + posladkowy sredni
+# - abs = prosty brzucha + skosne
+
+muscles:
+  chest:
+    name_en: "Chest"
+    name_pl: "Klatka piersiowa"
+  anterior_delts:
+    name_en: "Anterior Deltoids"
+    name_pl: "Przedni akton barku"
+  lateral_delts:
+    name_en: "Lateral Deltoids"
+    name_pl: "Boczny akton barku"
+  rear_delts:
+    name_en: "Rear Deltoids"
+    name_pl: "Tylny akton barku"
+  rhomboids:
+    name_en: "Rhomboids / Mid Traps"
+    name_pl: "Srodek czworobocznego i rownolegloboczne"
+  triceps:
+    name_en: "Triceps"
+    name_pl: "Triceps"
+  biceps:
+    name_en: "Biceps"
+    name_pl: "Biceps"
+  lats:
+    name_en: "Latissimus Dorsi"
+    name_pl: "Najszerszy grzbietu"
+  quads:
+    name_en: "Quadriceps"
+    name_pl: "Czworoglowy uda"
+  hamstrings:
+    name_en: "Hamstrings"
+    name_pl: "Dwuglowy uda"
+  glutes:
+    name_en: "Glutes"
+    name_pl: "Posladkowe"
+  adductors:
+    name_en: "Adductors"
+    name_pl: "Przywodziciele uda"
+  erectors:
+    name_en: "Erector Spinae"
+    name_pl: "Prostowniki grzbietu"
+  calves:
+    name_en: "Calves"
+    name_pl: "Lydki"
+  abs:
+    name_en: "Abdominals"
+    name_pl: "Miesnie brzucha"
+
+exercises:
+  squat:
+    csv_title: "Back squat"
+    name_en: "Back Squat"
+    name_pl: "Przysiad ze sztanga"
+    category: compound
+    primary_muscles: [quads, erectors]
+    secondary_muscles: [glutes]
+    tertiary_muscles: [hamstrings]
+
+  low_bar_squat:
+    csv_title: "Low Bar Przysiad (Squat)"
+    name_en: "Low Bar Squat"
+    name_pl: "Przysiad low bar"
+    category: compound
+    primary_muscles: [adductors, erectors]
+    secondary_muscles: [calves]
+    tertiary_muscles: [glutes]
+
+  high_bar_squat:
+    csv_title: "High Bar Squat"
+    name_en: "High Bar Squat"
+    name_pl: "Przysiad high bar"
+    category: compound
+    primary_muscles: [quads, glutes]
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  deadlift:
+    csv_title: "Martwy Ciąg (Deadlift)"
+    name_en: "Deadlift"
+    name_pl: "Martwy ciag"
+    category: compound
+    primary_muscles: [erectors, glutes, hamstrings]
+    secondary_muscles: [quads]
+    tertiary_muscles: []
+
+  sumo_deadlift:
+    csv_title: "Sumo Deadlift"
+    name_en: "Sumo Deadlift"
+    name_pl: "Martwy ciag sumo"
+    category: compound
+    primary_muscles: [abs, quads]
+    secondary_muscles: [glutes, calves, erectors]
+    tertiary_muscles: [hamstrings, adductors]
+
+  rdl:
+    csv_title: "Romanian Deadlift (RDL)"
+    name_en: "Romanian Deadlift"
+    name_pl: "Martwy ciag rumunski"
+    category: compound
+    primary_muscles: [hamstrings]
+    secondary_muscles: [glutes, erectors]   # fizjologicznie wymagane; CSV (Schoenfeld 2015) mierzy tylko biceps femoris
+    tertiary_muscles: []
+
+  bench_press:
+    csv_title: "Wyciskanie Leżąc (Bench Press)"
+    name_en: "Bench Press"
+    name_pl: "Wyciskanie lezac"
+    category: compound
+    primary_muscles: [chest]
+    secondary_muscles: [triceps, anterior_delts]
+    tertiary_muscles: [lateral_delts, rear_delts]
+
+  close_grip_bench:
+    csv_title: "Close Grip Bench Press"
+    name_en: "Close Grip Bench Press"
+    name_pl: "Wyciskanie waskim chwytem"
+    category: compound
+    primary_muscles: [chest]
+    secondary_muscles: [triceps, anterior_delts]
+    tertiary_muscles: []
+
+  spoto_press:
+    csv_title: "Spoto Press"
+    name_en: "Spoto Press"
+    name_pl: "Spoto press"
+    category: compound
+    primary_muscles: [chest, triceps]
+    secondary_muscles: [anterior_delts]
+    tertiary_muscles: []
+
+  incline_bench:
+    csv_title: "Incline Bench Press"
+    name_en: "Incline Bench Press"
+    name_pl: "Wyciskanie na skosie dodatnim"
+    category: compound
+    primary_muscles: [triceps, chest, anterior_delts]   # triceps=114%, chest=94%, ant_delts=91% (Rodríguez-Ridao 2020 / Lauver 2015)
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  incline_bench_45:
+    csv_title: "Incline Bench Press (45°)"
+    name_en: "Incline Bench Press (45°)"
+    name_pl: "Wyciskanie na skosie dodatnim 45 stopni"
+    category: compound
+    primary_muscles: [chest, triceps, anterior_delts]   # chest=125%, triceps=118%, ant_delts=98% (Lauver 2015)
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  decline_bench:
+    csv_title: "Decline Bench Press"
+    name_en: "Decline Bench Press"
+    name_pl: "Wyciskanie na skosie ujemnym"
+    category: compound
+    primary_muscles: [triceps, chest]   # triceps=102%, chest=89% (Lauver 2015)
+    secondary_muscles: [anterior_delts]   # ant_delts=58%
+    tertiary_muscles: []
+
+  chest_press_machine:
+    csv_title: "Chest Press (Maszyna siedząc)"
+    name_en: "Chest Press Machine"
+    name_pl: "Chest press na maszynie"
+    category: accessory
+    primary_muscles: [chest]
+    secondary_muscles: [anterior_delts]
+    tertiary_muscles: [triceps]
+
+  dips:
+    csv_title: "Dips (Pompki na poręczach - szerokie)"
+    name_en: "Dips"
+    name_pl: "Pompki na poreczach"
+    category: compound
+    primary_muscles: [chest, triceps]   # chest=85%, triceps=80% (Bagchi 2015 / McKenzie 2022)
+    secondary_muscles: [anterior_delts]   # ant_delts=65%
+    tertiary_muscles: [lateral_delts, abs]   # lateral_delts=25%, abs=25%
+
+  ohp:
+    csv_title: "Overhead Press (OHP)"
+    name_en: "Overhead Press"
+    name_pl: "Wyciskanie zolnierskie"
+    category: compound
+    primary_muscles: [anterior_delts]
+    secondary_muscles: [lateral_delts, triceps]
+    tertiary_muscles: [rear_delts, chest]
+
+  dumbbell_flyes:
+    csv_title: "Rozpiętki (Dumbbell Flyes)"
+    name_en: "Dumbbell Flyes"
+    name_pl: "Rozpietki"
+    category: isolation
+    primary_muscles: [chest]
+    secondary_muscles: [anterior_delts]
+    tertiary_muscles: [lateral_delts, rear_delts]
+
+  skull_crusher:
+    csv_title: "Wyciskanie Francuskie"
+    name_en: "Skull Crusher"
+    name_pl: "Wyciskanie francuskie"
+    category: isolation
+    primary_muscles: [triceps]
+    secondary_muscles: [anterior_delts]
+    tertiary_muscles: []
+
+  bulgarian_split_squat:
+    csv_title: "Bulgarian Split Squat"
+    name_en: "Bulgarian Split Squat"
+    name_pl: "Przysiad bulgarski"
+    category: accessory
+    primary_muscles: [quads, glutes]
+    secondary_muscles: [erectors]
+    tertiary_muscles: [hamstrings]
+
+  leg_press:
+    csv_title: "Leg Press"
+    name_en: "Leg Press"
+    name_pl: "Suwnica"
+    category: accessory
+    primary_muscles: [quads]
+    secondary_muscles: [glutes]
+    tertiary_muscles: [hamstrings]
+
+  leg_curl:
+    csv_title: "Leg Curl (Uginanie nóg)"
+    name_en: "Leg Curl"
+    name_pl: "Uginanie nog"
+    category: isolation
+    primary_muscles: [hamstrings]
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  leg_extension:
+    csv_title: "Leg Extension"
+    name_en: "Leg Extension"
+    name_pl: "Prostowanie nog"
+    category: isolation
+    primary_muscles: [quads]
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  pendlay_row:
+    csv_title: "Pendlay Row / Barbell Row"
+    name_en: "Pendlay Row / Barbell Row"
+    name_pl: "Wioslowanie sztanga Pendlay"
+    category: compound
+    primary_muscles: [rear_delts, erectors]
+    secondary_muscles: [rhomboids, lats]
+    tertiary_muscles: []
+
+  pull_up:
+    csv_title: "Pull-ups"
+    name_en: "Pull-ups"
+    name_pl: "Podciaganie"
+    category: compound
+    primary_muscles: [rear_delts, lats]
+    secondary_muscles: [rhomboids, biceps]
+    tertiary_muscles: []
+
+  lat_pulldown:
+    csv_title: "Lat Pulldown"
+    name_en: "Lat Pulldown"
+    name_pl: "Sciaganie drazka wyciagu gornego"
+    category: compound
+    primary_muscles: [lats, rhomboids]
+    secondary_muscles: [rear_delts, biceps]
+    tertiary_muscles: []
+
+  reverse_fly:
+    csv_title: "Reverse Fly (Maszyna)"
+    name_en: "Reverse Fly Machine"
+    name_pl: "Reverse fly na maszynie"
+    category: isolation
+    primary_muscles: [rear_delts, lateral_delts]
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  seal_row:
+    csv_title: "Seal Row"
+    name_en: "Seal Row"
+    name_pl: "Seal row"
+    category: accessory
+    primary_muscles: [rear_delts, rhomboids]
+    secondary_muscles: [lats]
+    tertiary_muscles: [erectors]
+
+  plank:
+    csv_title: "Plank (Deska)"
+    name_en: "Plank"
+    name_pl: "Deska"
+    category: core
+    primary_muscles: [abs]
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  farmers_walk:
+    csv_title: "Farmer’s Walk"
+    name_en: "Farmer's Walk"
+    name_pl: "Spacer farmera"
+    category: core
+    primary_muscles: [erectors]
+    secondary_muscles: [abs]
+    tertiary_muscles: []
+
+  leg_raises:
+    csv_title: "Wznosy nóg w zwisie"
+    name_en: "Hanging Leg Raises"
+    name_pl: "Wznosy nog w zwisie"
+    category: core
+    primary_muscles: [abs]
+    secondary_muscles: [lats, quads]
+    tertiary_muscles: [erectors]
+
+  ab_wheel:
+    csv_title: "Ab Wheel Rollout (Kółko)"
+    name_en: "Ab Wheel Rollout"
+    name_pl: "Ab wheel rollout"
+    category: core
+    primary_muscles: [abs]
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  dead_bug:
+    csv_title: "Dead Bug (60 bpm - wolne tempo)"
+    name_en: "Dead Bug"
+    name_pl: "Dead bug"
+    category: core
+    primary_muscles: [abs]
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  trx_bodysaw:
+    csv_title: "TRX Bodysaw"
+    name_en: "TRX Bodysaw"
+    name_pl: "TRX bodysaw"
+    category: core
+    primary_muscles: [abs]   # abs=79% (Cugliari 2017)
+    secondary_muscles: []
+    tertiary_muscles: [erectors]   # erectors=4% — bardzo niski, nie zasługuje na secondary
+
+  suitcase_carry:
+    csv_title: "Suitcase Carry"
+    name_en: "Suitcase Carry"
+    name_pl: "Spacer jednoracz"
+    category: core
+    primary_muscles: [abs, erectors]
+    secondary_muscles: []
+    tertiary_muscles: []
+
+  bird_dog:
+    csv_title: "Bird Dog (Pies-ptak)"
+    name_en: "Bird Dog"
+    name_pl: "Pies-ptak"
+    category: core
+    primary_muscles: [glutes, erectors]
+    secondary_muscles: []
+    tertiary_muscles: []
