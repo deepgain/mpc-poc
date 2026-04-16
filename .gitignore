@@ -4,7 +4,6 @@ __pycache__/
 .ipynb_checkpoints/
 training_data.csv
 train_output.log
-charts/
 chart_*.png
 .claude/
 *.pt
