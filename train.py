@@ -42,6 +42,7 @@ ALL_MUSCLES = [
     "chest", "anterior_delts", "lateral_delts", "rear_delts",
     "upper_traps", "rhomboids", "triceps", "biceps", "brachialis",
     "lats", "quads", "hamstrings", "glutes", "adductors", "erectors", "calves",
+    "abs",
 ]
 NUM_MUSCLES = len(ALL_MUSCLES)
 MUSCLE_TO_IDX = {m: i for i, m in enumerate(ALL_MUSCLES)}
@@ -339,7 +340,7 @@ class ExponentialRecovery(nn.Module):
     Large:  quads, hamstrings, glutes, adductors
     """
     # Muscle indices by size bucket (matches ALL_MUSCLES ordering)
-    SMALL_IDX  = [6, 7, 8, 15, 3, 2]   # triceps, biceps, brachialis, calves, rear_delts, lateral_delts
+    SMALL_IDX  = [6, 7, 8, 15, 3, 2, 16]  # triceps, biceps, brachialis, calves, rear_delts, lateral_delts, abs
     MEDIUM_IDX = [0, 1, 4, 5, 9, 14]    # chest, anterior_delts, upper_traps, rhomboids, lats, erectors
     LARGE_IDX  = [10, 11, 12, 13]        # quads, hamstrings, glutes, adductors
 
@@ -362,6 +363,7 @@ class ExponentialRecovery(nn.Module):
         12.0,  # adductors — Korak 2015
         12.0,  # erectors — Belcher 2019 deadlift, fiber type
         8.0,   # calves — Lievens 2020, soleus fiber type
+        10.0,  # abs — fast recovery, postural/stabilizer role
     ]
 
     def __init__(self, num_muscles):
