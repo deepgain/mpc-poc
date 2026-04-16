@@ -6,3 +6,4 @@ training_data.csv
 train_output.log
 chart_*.png
 .claude/
+*.pt
