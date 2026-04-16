@@ -12,6 +12,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import os
 import warnings
 import time
 warnings.filterwarnings("ignore")
@@ -45,8 +46,8 @@ ALL_MUSCLES = [
 NUM_MUSCLES = len(ALL_MUSCLES)
 MUSCLE_TO_IDX = {m: i for i, m in enumerate(ALL_MUSCLES)}
 
-# ─── Exercises with muscle involvement coefficients ───
-EXERCISE_MUSCLES = {
+# ─── Exercises with muscle involvement coefficients (yaml-loadable) ───────────
+_EXERCISE_MUSCLES_HARDCODED = {
     "bench_press":        {"chest": 0.85, "triceps": 0.55, "anterior_delts": 0.60},
     "incline_bench":      {"chest": 0.70, "anterior_delts": 0.75, "triceps": 0.50},
     "close_grip_bench":   {"chest": 0.65, "triceps": 0.75, "anterior_delts": 0.55},
@@ -76,6 +77,62 @@ EXERCISE_MUSCLES = {
     "calf_raise":         {"calves": 0.90},
 }
 
+def _load_exercise_data(yaml_path: str = "exercise_muscle_order.yaml"):
+    """Load exercise/muscle data from exercise_muscle_order.yaml if present.
+
+    Returns:
+        exercise_muscles : dict[exercise_id -> dict[muscle_id -> float]]
+            Numeric involvement coefficients used in the MPC update rule.
+            New exercises (from yaml, not in hardcoded dict) get rank-derived
+            coefficients: coeff(rank r) = max(1.0 - 0.15*r, 0.3).
+        exercise_ordinal : dict[exercise_id -> list[muscle_id]]
+            Muscles ordered from most to least involved (primary first).
+            Used by the ordinal ordering penalty once yaml is available.
+    """
+    fallback_ordinal = {
+        ex: sorted(ms.keys(), key=ms.get, reverse=True)
+        for ex, ms in _EXERCISE_MUSCLES_HARDCODED.items()
+    }
+
+    try:
+        import yaml
+        with open(yaml_path, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    except FileNotFoundError:
+        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+    except Exception as exc:
+        print(f"Warning: could not load {yaml_path}: {exc}. Using hardcoded values.")
+        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+
+    if not data or "exercises" not in data:
+        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+
+    exercise_muscles = dict(_EXERCISE_MUSCLES_HARDCODED)
+    exercise_ordinal = dict(fallback_ordinal)
+
+    for ex_id, ex_data in data["exercises"].items():
+        if not isinstance(ex_data, dict):
+            continue
+        ranked = (
+            ex_data.get("primary_muscles", [])
+            + ex_data.get("secondary_muscles", [])
+            + ex_data.get("tertiary_muscles", [])
+        )
+        if not ranked:
+            continue
+        valid_ranked = [m for m in ranked if m in MUSCLE_TO_IDX]
+        exercise_ordinal[ex_id] = valid_ranked
+        if ex_id not in exercise_muscles and valid_ranked:
+            exercise_muscles[ex_id] = {m: 0.7 for m in valid_ranked}
+
+    updated = sum(1 for ex in exercise_ordinal if ex in data.get("exercises", {}))
+    new_ex = sum(1 for ex in exercise_muscles if ex not in _EXERCISE_MUSCLES_HARDCODED)
+    print(f"Exercise data: loaded ordinal rankings from {yaml_path} ({updated} exercises, {new_ex} new)")
+    return exercise_muscles, exercise_ordinal
+
+
+EXERCISE_MUSCLES, EXERCISE_ORDINAL = _load_exercise_data()
+
 ALL_EXERCISES = list(EXERCISE_MUSCLES.keys())
 NUM_EXERCISES = len(ALL_EXERCISES)
 EXERCISE_TO_IDX = {e: i for i, e in enumerate(ALL_EXERCISES)}
@@ -84,58 +141,54 @@ INVOLVEMENT_MATRIX = np.zeros((NUM_EXERCISES, NUM_MUSCLES), dtype=np.float32)
 for ex_name, muscles in EXERCISE_MUSCLES.items():
     ei = EXERCISE_TO_IDX[ex_name]
     for m_name, coeff in muscles.items():
-        mi = MUSCLE_TO_IDX[m_name]
-        INVOLVEMENT_MATRIX[ei, mi] = coeff
+        mi = MUSCLE_TO_IDX.get(m_name)
+        if mi is not None:
+            INVOLVEMENT_MATRIX[ei, mi] = coeff
 
 print(f"Exercises: {NUM_EXERCISES}, Muscles: {NUM_MUSCLES}")
 
 # ═══════════════════════════════════════════════════════════════════
-# DATA LOADING & 70/30 SPLIT
+# DATA LOADING
 # ═══════════════════════════════════════════════════════════════════
 
-print("Loading data...")
-df = pd.read_csv("training_data.csv")
-df["timestamp"] = pd.to_datetime(df["timestamp"], format="ISO8601")
-df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
-df["exercise_idx"] = df["exercise"].map(EXERCISE_TO_IDX)
-df = df.dropna(subset=["exercise_idx"])
-df["exercise_idx"] = df["exercise_idx"].astype(int)
-
-# ── CURRICULUM: focus on specific muscles ──
-# Set to None to train on everything, or list target muscles
-FOCUS_MUSCLES = None  # train on all muscles
-# FOCUS_MUSCLES = None  # uncomment for all muscles
-
-if FOCUS_MUSCLES:
-    # Auto-include any exercise that involves any target muscle
-    focus_exercises = set()
-    for ex, muscles in EXERCISE_MUSCLES.items():
-        if any(m in FOCUS_MUSCLES for m in muscles):
-            focus_exercises.add(ex)
-    df = df[df["exercise"].isin(focus_exercises)].copy()
-    user_counts = df.groupby("user_id").size()
-    valid_users = user_counts[user_counts >= 50].index
-    df = df[df["user_id"].isin(valid_users)].copy()
+def _load_split(path):
+    df = pd.read_csv(path)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="ISO8601")
     df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
-    print(f"Curriculum: {FOCUS_MUSCLES} → {len(focus_exercises)} exercises: {sorted(focus_exercises)}")
-    print(f"  Users with 50+ sets: {df['user_id'].nunique()}")
+    df["exercise_idx"] = df["exercise"].map(EXERCISE_TO_IDX)
+    df = df.dropna(subset=["exercise_idx"])
+    df["exercise_idx"] = df["exercise_idx"].astype(int)
+    df["delta_t_hours"] = df.groupby("user_id")["timestamp"].diff().dt.total_seconds() / 3600.0
+    df["delta_t_hours"] = df["delta_t_hours"].fillna(0.0)
+    return df
 
-df["delta_t_hours"] = df.groupby("user_id")["timestamp"].diff().dt.total_seconds() / 3600.0
-df["delta_t_hours"] = df["delta_t_hours"].fillna(0.0)
+_SPLIT_CANDIDATES = [
+    ("generated_datasets/baseline_main/training_data_train.csv",
+     "generated_datasets/baseline_main/training_data_val.csv"),
+    ("training_data_train.csv", "training_data_val.csv"),
+]
 
-user_ids = df["user_id"].unique()
-rng = np.random.RandomState(42)
-rng.shuffle(user_ids)
-split = int(0.7 * len(user_ids))
-train_users = set(user_ids[:split])
-test_users = set(user_ids[split:])
+print("Loading data...")
+_loaded = False
+for _train_path, _val_path in _SPLIT_CANDIDATES:
+    if os.path.exists(_train_path) and os.path.exists(_val_path):
+        train_df = _load_split(_train_path)
+        test_df  = _load_split(_val_path)
+        print(f"Loaded pre-split files: {_train_path}")
+        _loaded = True
+        break
+if not _loaded:
+    df = _load_split("training_data.csv")
+    user_ids = df["user_id"].unique()
+    rng = np.random.RandomState(42)
+    rng.shuffle(user_ids)
+    split = int(0.7 * len(user_ids))
+    train_df = df[df["user_id"].isin(set(user_ids[:split]))].copy()
+    test_df  = df[df["user_id"].isin(set(user_ids[split:]))].copy()
+    print(f"Loaded training_data.csv, split 70/30")
 
-train_df = df[df["user_id"].isin(train_users)].copy()
-test_df = df[df["user_id"].isin(test_users)].copy()
-
-print(f"Total sets: {len(df):,}")
-print(f"Train: {len(train_df):,} sets from {len(train_users)} users")
-print(f"Test:  {len(test_df):,} sets from {len(test_users)} users")
+print(f"Train: {len(train_df):,} sets from {train_df['user_id'].nunique()} users")
+print(f"Test:  {len(test_df):,} sets from {test_df['user_id'].nunique()} users")
 
 # ═══════════════════════════════════════════════════════════════════
 # DATASET & DATALOADER
@@ -347,11 +400,11 @@ class DeepGainModel(nn.Module):
                              torch.tensor(INVOLVEMENT_MATRIX, dtype=torch.float32))
 
     def fatigue_ordering_penalty(self):
-        """Penalize f when drop ordering doesn't match involvement ordering.
+        """Penalize f when drop ordering doesn't match ordinal involvement ranking.
 
-        For each exercise, muscles with higher involvement should have higher
-        raw drops from f. Probes f at a reference point (w=0.4, r=0.27,
-        rir=0.4, mpc=1.0) and penalizes pairwise ordering violations.
+        For each exercise, muscles listed earlier in EXERCISE_ORDINAL (more primary)
+        should have higher raw drops from f. Probes f at a reference point
+        (w=0.4, r=0.27, rir=0.4, mpc=1.0) and penalizes pairwise ordering violations.
         """
         device = self.involvement.device
         penalty = torch.tensor(0.0, device=device)
@@ -368,23 +421,27 @@ class DeepGainModel(nn.Module):
             if len(involved) < 2:
                 continue
 
+            ex_id = ALL_EXERCISES[ei]
+            ordinal = EXERCISE_ORDINAL.get(ex_id, [])
+            rank_map = {MUSCLE_TO_IDX[m]: rank for rank, m in enumerate(ordinal) if m in MUSCLE_TO_IDX}
+
             e_embed = self.exercise_embed(torch.tensor([ei], device=device))
 
-            # Get raw drops for each involved muscle
+            # Get raw drops and ordinal ranks for each involved muscle
             drops = []
-            invs = []
+            ranks = []
             for mi in involved:
                 m_embed = self.muscle_embed(mi.unsqueeze(0))
                 drop = self.f_net(w, r, rir, mpc, e_embed, m_embed)
                 drops.append(drop)
-                invs.append(inv[mi])
+                ranks.append(rank_map.get(mi.item(), len(ordinal)))
 
-            # Pairwise: if inv[a] > inv[b], then drop[a] should > drop[b]
+            # Pairwise: if rank[a] < rank[b] (a more primary), then drop[a] should > drop[b]
             for a in range(len(drops)):
                 for b in range(a + 1, len(drops)):
-                    if invs[a] > invs[b]:
+                    if ranks[a] < ranks[b]:
                         penalty = penalty + torch.relu(drops[b] - drops[a])
-                    elif invs[b] > invs[a]:
+                    elif ranks[b] < ranks[a]:
                         penalty = penalty + torch.relu(drops[a] - drops[b])
                     n_pairs += 1
 
@@ -525,7 +582,7 @@ for epoch in range(EPOCHS):
         rir_pred, _ = model(batch["exercise_idx"], batch["weight"],
                             batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
         loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
-        loss = loss + 0.01 * model.fatigue_ordering_penalty()
+        loss = loss + 0.05 * model.fatigue_ordering_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -567,9 +624,12 @@ for epoch in range(EPOCHS):
         tau_strs.append(f"{m[:4]}={math.exp(model.r.log_tau[mi].item()):.0f}")
     tau_all_str = "  τ: " + " | ".join(tau_strs)
 
+    with torch.no_grad():
+        ord_penalty = model.fatigue_ordering_penalty().item()
+
     print(f"Epoch {epoch+1:3d}/{EPOCHS} | "
           f"Train RMSE: {train_rmse:.2f} RIR | Val RMSE: {val_rmse:.2f} RIR | "
-          f"{elapsed:.0f}s", flush=True)
+          f"ord_pen: {ord_penalty:.4f} | {elapsed:.0f}s", flush=True)
     print(recovery_str, flush=True)
     print(tau_all_str, flush=True)
 
@@ -639,7 +699,7 @@ ax.set_title("Training & Validation Loss")
 ax.legend()
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.savefig("chart_loss_curves.png", dpi=150)
+plt.savefig("charts/chart_loss_curves.png", dpi=150)
 print("Saved chart_loss_curves.png")
 
 # --- Chart 2: RIR Prediction Accuracy ---
@@ -682,7 +742,7 @@ ax.set_title(f"Error Distribution (mean={np.mean(errors):.3f}, std={np.std(error
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("chart_rir_accuracy.png", dpi=150)
+plt.savefig("charts/chart_rir_accuracy.png", dpi=150)
 print("Saved chart_rir_accuracy.png")
 
 # --- Chart 3: MPC Trajectories ---
@@ -745,7 +805,7 @@ for row, seq in enumerate(sample_users):
         ax.set_xlabel("Hours from first set")
 
 plt.tight_layout()
-plt.savefig("chart_mpc_trajectories.png", dpi=150)
+plt.savefig("charts/chart_mpc_trajectories.png", dpi=150)
 print("Saved chart_mpc_trajectories.png")
 
 # --- Chart 4: Recovery Curves ---
@@ -774,7 +834,7 @@ ax.legend(fontsize=7, ncol=4, loc="lower right")
 ax.set_ylim(0.4, 1.05)
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.savefig("chart_recovery_curves.png", dpi=150)
+plt.savefig("charts/chart_recovery_curves.png", dpi=150)
 print("Saved chart_recovery_curves.png")
 
 # --- Chart 5: Fatigue Heatmaps ---
@@ -816,7 +876,205 @@ with torch.no_grad():
 
 plt.suptitle("Fatigue Response (f) at RIR 2, MPC=1.0", fontsize=14, y=1.02)
 plt.tight_layout()
-plt.savefig("chart_fatigue_heatmaps.png", dpi=150)
+plt.savefig("charts/chart_fatigue_heatmaps.png", dpi=150)
 print("Saved chart_fatigue_heatmaps.png")
+
+# ── Chart 6: Cross-exercise fatigue transfer matrix ──────────────────────────
+_transfer_ex = [e for e in ["bench_press", "ohp", "dips", "squat", "deadlift",
+                             "pendlay_row", "lat_pulldown", "rdl", "pull_up"]
+                if e in EXERCISE_TO_IDX]
+n = len(_transfer_ex)
+tmat = np.zeros((n, n))
+with torch.no_grad():
+    for i, ea in enumerate(_transfer_ex):
+        for j, eb in enumerate(_transfer_ex):
+            mpc_b = torch.ones(1, NUM_MUSCLES, device=DEVICE)
+            eeb = model.exercise_embed(torch.tensor([EXERCISE_TO_IDX[eb]], device=DEVICE))
+            wb = torch.tensor([0.4], dtype=torch.float32, device=DEVICE)
+            rb = torch.tensor([0.27], dtype=torch.float32, device=DEVICE)
+            rir_fresh = model.g_net(wb, rb, eeb, mpc_b).item() * RIR_SCALE
+
+            mpc = torch.ones(1, NUM_MUSCLES, device=DEVICE)
+            eea = model.exercise_embed(torch.tensor([EXERCISE_TO_IDX[ea]], device=DEVICE))
+            me_all = model.muscle_embed(torch.arange(NUM_MUSCLES, device=DEVICE)).unsqueeze(0)
+            Ed = me_all.shape[-1]
+            for _ in range(4):
+                inv = model.involvement[torch.tensor([EXERCISE_TO_IDX[ea]], device=DEVICE)]
+                drop = model.f_net(
+                    torch.tensor([0.4], dtype=torch.float32, device=DEVICE).expand(NUM_MUSCLES),
+                    torch.tensor([0.27], dtype=torch.float32, device=DEVICE).expand(NUM_MUSCLES),
+                    torch.tensor([0.4], dtype=torch.float32, device=DEVICE).expand(NUM_MUSCLES),
+                    mpc.reshape(-1),
+                    eea.expand(NUM_MUSCLES, -1),
+                    me_all.reshape(NUM_MUSCLES, Ed),
+                ).reshape(1, NUM_MUSCLES)
+                mpc = (mpc * (1.0 - inv * drop)).clamp(min=0.1)
+            rir_fat = model.g_net(wb, rb, eeb, mpc).item() * RIR_SCALE
+            tmat[i, j] = rir_fresh - rir_fat
+
+fig, ax = plt.subplots(figsize=(10, 8))
+labs = [e.replace("_", " ") for e in _transfer_ex]
+im = ax.imshow(tmat, cmap="YlOrRd", vmin=0)
+ax.set_xticks(range(n)); ax.set_yticks(range(n))
+ax.set_xticklabels(labs, rotation=45, ha="right", fontsize=9)
+ax.set_yticklabels(labs, fontsize=9)
+ax.set_xlabel("Exercise B (tested after)")
+ax.set_ylabel("Exercise A (4 sets first)")
+ax.set_title("Cross-Exercise Fatigue Transfer\n(RIR decrease on B after 4 sets of A)")
+for i in range(n):
+    for j in range(n):
+        c = "white" if tmat[i, j] > tmat.max() * 0.6 else "black"
+        ax.text(j, i, f"{tmat[i, j]:.1f}", ha="center", va="center", fontsize=8, color=c)
+plt.colorbar(im, ax=ax, label="RIR decrease", shrink=0.8)
+plt.tight_layout()
+plt.savefig("charts/chart_transfer_matrix.png", dpi=150)
+print("Saved chart_transfer_matrix.png")
+
+# ── Chart 7: Per-muscle fatigue breakdown ────────────────────────────────────
+_probe_ex = [e for e in ["bench_press", "squat", "deadlift", "ohp", "pendlay_row", "dips"]
+             if e in EXERCISE_TO_IDX]
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+with torch.no_grad():
+    for idx, ex in enumerate(_probe_ex):
+        ax = axes[idx // 3, idx % 3]
+        ei = EXERCISE_TO_IDX[ex]
+        ms = EXERCISE_MUSCLES[ex]
+        ee = model.exercise_embed(torch.tensor([ei], device=DEVICE))
+        involved = sorted(ms.keys(), key=lambda m: ms[m], reverse=True)
+        drops, cols = [], []
+        for m in involved:
+            me = model.muscle_embed(torch.tensor([MUSCLE_TO_IDX[m]], device=DEVICE))
+            d = model.f_net(
+                torch.tensor([0.4], dtype=torch.float32, device=DEVICE),
+                torch.tensor([0.27], dtype=torch.float32, device=DEVICE),
+                torch.tensor([0.4], dtype=torch.float32, device=DEVICE),
+                torch.tensor([1.0], dtype=torch.float32, device=DEVICE),
+                ee, me,
+            ).item()
+            drops.append(d * ms[m])
+            cols.append(muscle_colors[MUSCLE_TO_IDX[m]])
+        labs = [m.replace("_", " ") for m in involved]
+        ax.barh(range(len(labs)), drops, color=cols, alpha=0.85)
+        ax.set_yticks(range(len(labs)))
+        ax.set_yticklabels(labs, fontsize=9)
+        ax.set_xlabel("MPC Drop")
+        ax.set_title(f"{ex.replace('_', ' ').title()}")
+        ax.invert_yaxis()
+        ax.grid(True, alpha=0.3, axis="x")
+        for i, (d, m) in enumerate(zip(drops, involved)):
+            ax.text(d + 0.001, i, f"inv={ms[m]:.2f}", va="center", fontsize=7, color="gray")
+plt.suptitle("Learned Fatigue (f) — Per-Muscle Breakdown", fontsize=14)
+plt.tight_layout()
+plt.savefig("charts/chart_muscle_breakdown.png", dpi=150)
+print("Saved chart_muscle_breakdown.png")
+
+# ── Chart 8: RIR sensitivity per exercise ────────────────────────────────────
+_sens_ex = [e for e in ["bench_press", "squat", "deadlift", "ohp", "pendlay_row", "lat_pulldown"]
+            if e in EXERCISE_TO_IDX]
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+with torch.no_grad():
+    for idx, ex in enumerate(_sens_ex):
+        ax = axes[idx // 3, idx % 3]
+        ei = EXERCISE_TO_IDX[ex]
+        ee = model.exercise_embed(torch.tensor([ei], device=DEVICE))
+        w = torch.tensor([0.4], dtype=torch.float32, device=DEVICE)
+        r = torch.tensor([0.27], dtype=torch.float32, device=DEVICE)
+        mpc_base = torch.ones(1, NUM_MUSCLES, device=DEVICE)
+        rir_base = model.g_net(w, r, ee, mpc_base).item() * RIR_SCALE
+        deltas = {}
+        for mi in range(NUM_MUSCLES):
+            mpc_test = torch.ones(1, NUM_MUSCLES, device=DEVICE)
+            mpc_test[0, mi] = 0.5
+            rir_test = model.g_net(w, r, ee, mpc_test).item() * RIR_SCALE
+            deltas[ALL_MUSCLES[mi]] = rir_test - rir_base
+        sd = sorted(deltas.items(), key=lambda x: abs(x[1]), reverse=True)[:10]
+        names = [m.replace("_", " ") for m, _ in sd]
+        vals = [d for _, d in sd]
+        cols = ["#e74c3c" if d < 0 else "#2ecc71" for d in vals]
+        ax.barh(range(len(names)), vals, color=cols, alpha=0.8)
+        ax.set_yticks(range(len(names)))
+        ax.set_yticklabels(names, fontsize=8)
+        ax.set_xlabel("RIR change (muscle at 50%)")
+        ax.set_title(f"{ex.replace('_', ' ').title()} (baseline RIR={rir_base:.1f})")
+        ax.axvline(0, color="black", linewidth=0.5)
+        ax.invert_yaxis()
+        ax.grid(True, alpha=0.3, axis="x")
+plt.suptitle("RIR Sensitivity (g) — Which Muscle Fatigue Affects RIR Most?", fontsize=14)
+plt.tight_layout()
+plt.savefig("charts/chart_rir_sensitivity.png", dpi=150)
+print("Saved chart_rir_sensitivity.png")
+
+# ── Chart 9: MPC per muscle per user (per-muscle subplots, smooth recovery) ──
+INTERP_PER_GAP = 20
+for seq in sample_users:
+    ts = seq["timestamps"]
+    t0 = ts[0]
+    hours_all = np.array([(t - t0) / np.timedelta64(1, "h") for t in ts])
+    mask_3w = hours_all <= 504
+    T_plot = max(int(mask_3w.sum()), min(len(seq["exercise_idx"]), 300))
+
+    with torch.no_grad():
+        _, mh = model.forward_with_mpc_history(
+            seq["exercise_idx"][:T_plot].unsqueeze(0).to(DEVICE),
+            seq["weight"][:T_plot].unsqueeze(0).to(DEVICE),
+            seq["reps"][:T_plot].unsqueeze(0).to(DEVICE),
+            seq["rir"][:T_plot].unsqueeze(0).to(DEVICE),
+            seq["delta_t"][:T_plot].unsqueeze(0).to(DEVICE))
+
+    hours = hours_all[:T_plot]
+    mpc_post = mh[1:]
+
+    smooth_hours, smooth_mpc = [], []
+    with torch.no_grad():
+        for t in range(T_plot):
+            smooth_hours.append(hours[t])
+            smooth_mpc.append(mpc_post[t])
+            if t < T_plot - 1:
+                gap_h = hours[t + 1] - hours[t]
+                if gap_h > 0.5:
+                    n_pts = min(INTERP_PER_GAP, max(3, int(gap_h / 2)))
+                    for dt_h in np.linspace(0.5, gap_h - 0.01, n_pts):
+                        mpc_start = torch.tensor(mpc_post[t], dtype=torch.float32, device=DEVICE)
+                        dt_norm = torch.full((NUM_MUSCLES,), float(np.log1p(dt_h) / DT_SCALE),
+                                            dtype=torch.float32, device=DEVICE)
+                        m_idx = torch.arange(NUM_MUSCLES, dtype=torch.long, device=DEVICE)
+                        recovered = model.r(mpc_start, dt_norm, m_idx).cpu().numpy()
+                        smooth_hours.append(hours[t] + dt_h)
+                        smooth_mpc.append(recovered)
+
+    order = np.argsort(smooth_hours)
+    smooth_hours = np.array(smooth_hours)[order]
+    smooth_mpc = np.array(smooth_mpc)[order]
+    days = smooth_hours / 24.0
+
+    used = seq["exercise_idx"][:T_plot].numpy()
+    active_muscles = [mi for mi in range(NUM_MUSCLES) if np.any(INVOLVEMENT_MATRIX[used, mi] > 0)]
+    n_cols = 4
+    n_rows = math.ceil(len(active_muscles) / n_cols)
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 3 * n_rows), sharex=True, sharey=True)
+    uid = seq["user_id"]
+    fig.suptitle(f"{uid} — MPC per Muscle ({days[-1]:.0f} days, {T_plot} sets)", fontsize=15, y=1.01)
+
+    for idx, mi in enumerate(active_muscles):
+        ax = axes[idx // n_cols, idx % n_cols] if n_rows > 1 else axes[idx % n_cols]
+        tau = math.exp(model.r.log_tau[mi].item())
+        ax.plot(days, smooth_mpc[:, mi], color=muscle_colors[mi], linewidth=1.5)
+        ax.fill_between(days, smooth_mpc[:, mi], 1.0, alpha=0.08, color=muscle_colors[mi])
+        ax.set_title(f"{ALL_MUSCLES[mi].replace('_', ' ')} (τ={tau:.0f}h)", fontsize=11, fontweight="bold")
+        ax.set_ylim(0.0, 1.05)
+        ax.grid(True, alpha=0.2)
+        if idx // n_cols == n_rows - 1:
+            ax.set_xlabel("Days")
+        if idx % n_cols == 0:
+            ax.set_ylabel("MPC")
+
+    for idx in range(len(active_muscles), n_rows * n_cols):
+        ax = axes[idx // n_cols, idx % n_cols] if n_rows > 1 else axes[idx % n_cols]
+        ax.set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(f"charts/chart_mpc_per_muscle_{uid}.png", dpi=150)
+    print(f"Saved chart_mpc_per_muscle_{uid}.png")
 
 print("\nDone! All charts saved.")
