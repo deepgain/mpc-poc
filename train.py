@@ -28,7 +28,7 @@ print(f"Device: {DEVICE}")
 
 # ─── Hyperparameters ───
 EMBED_DIM = 32
-HIDDEN_DIM = 128
+HIDDEN_DIM = 256
 LR = 1e-3
 EPOCHS = 50
 CHUNK_LEN = 512

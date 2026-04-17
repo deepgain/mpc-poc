@@ -1,21 +1,33 @@
-# Train Report — Milestone 5
+# Train Report — Milestone 6
 
 ## Metryki
 
-| | Baseline (27 ćw.) | M2 (44 ćw.) | M3 (47 ćw., 17 mięśni) | M4 (34 ćw., 15 mięśni) | **M5 (34 ćw., 15 mięśni)** |
-|---|---|---|---|---|---|
-| Val RMSE | 1.08 RIR | 1.005 RIR | 0.845 RIR | 0.869 RIR¹ | **0.963 RIR** |
-| MAE | 0.86 RIR | 0.789 RIR | 0.656 RIR | 0.673 RIR¹ | **0.753 RIR** |
-| R | 0.789 | 0.833 | 0.884 | 0.878¹ | **0.842** |
-| Ordering acc | — | — | — | 90% | **93%** |
-| Split | per-ex | per-ex | per-ex | per-ex¹ | per-user |
+| | Baseline (27 ćw.) | M2 (44 ćw.) | M3 (47 ćw., 17 mięśni) | M4 (34 ćw., 15 mięśni) | M5 (34 ćw., 15 mięśni) | **M6 (34 ćw., 15 mięśni)** |
+|---|---|---|---|---|---|---|
+| Val RMSE | 1.08 RIR | 1.005 RIR | 0.845 RIR | 0.869 RIR¹ | 0.963 RIR | **0.924 RIR** |
+| MAE | 0.86 RIR | 0.789 RIR | 0.656 RIR | 0.673 RIR¹ | 0.753 RIR | **0.749 RIR** |
+| R | 0.789 | 0.833 | 0.884 | 0.878¹ | 0.842 | **0.854** |
+| Ordering acc | — | — | — | 90% | 93% | **95%** |
+| HIDDEN_DIM | 128 | 128 | 128 | 128 | 128 | **256** |
+| Parametry | ~66k | ~66k | ~66k | ~66k | ~66k | **~230k** |
+| Split | per-ex | per-ex | per-ex | per-ex¹ | per-user | per-user |
 
-¹ M4 walidowany na danych z data leakage — per-exercise split powodował że wszyscy 312 userów byli w obu setach. Metryki M4 są zbyt optymistyczne. M5 używa czystego per-user holdoutu (218 train / 94 val, zero overlap) — liczby są uczciwe.
+¹ M4 walidowany na danych z data leakage — per-exercise split powodował że wszyscy 312 userów byli w obu setach. Metryki M4 są zbyt optymistyczne. M5+ używa czystego per-user holdoutu (218 train / 94 val, zero overlap) — liczby są uczciwe.
 
 Dataset: `training_data_michal_full.csv` — 723k train / 327k val, 218/94 userów, 34 ćwiczenia.
-Checkpoint: `deepgain_model_muscle_ord.pt` (val RMSE 0.963, epoka 50/50).
+Checkpoint M6: `deepgain_model_muscle_ord.pt` (val RMSE 0.924, best epoka 49/50). M5: epoka 50/50, val RMSE 0.963.
 
-M5: MAE lepsze od M4 o 0.09 RIR, R lepsze (0.842 vs 0.878 — ale M4 miał data leakage), ordering accuracy 93% vs 90%. Plateau od epoki ~36 na 0.96–0.97 — model osiągnął optimum przy tej architekturze i datasecie. Potencjał dalszej poprawy: większy HIDDEN_DIM lub więcej danych cross-muscle.
+**M6 vs M5:** RMSE −0.039, MAE −0.004, R +0.012, ordering +2pp. M5 osiągnął plateau na 0.96–0.97 od epoki ~36 — M6 (HIDDEN_DIM=256) przebija ten sufit i stabilizuje się na 0.92–0.95. Większa pojemność modelu przekłada się na lepszą generalizację cross-muscle. Dalsze skalowanie (HIDDEN_DIM=512) możliwe, ale diminishing returns bez więcej danych.
+
+---
+
+## M6 — Co się zmieniło względem M5
+
+- **HIDDEN_DIM=256** zamiast 128 — 229k parametrów vs 66k. Jedyna zmiana architektury.
+- **Best checkpointing** — `deepgain_model_muscle_ord.pt` zawiera best checkpoint (epoka 49, RMSE 0.924), nie ostatnią epokę (50, RMSE 0.946). M5 nie miał best checkpointing — `muscle_ord.pt` był ostatnią epoką.
+- Dataset, split, normalizacja, penalty — bez zmian vs M5.
+
+**Wniosek z M6:** plateau M5 (~0.96) było ograniczeniem pojemności, nie danych. HIDDEN_DIM=256 przełamuje je i daje 0.924. Ordering 95% (vs 93%) potwierdza że większy model lepiej uczy się hierarchii mięśni. Deadlift nadal 67% — to problem danych (brak sygnału hamstrings/glutes), nie architektury.
 
 ---
 
@@ -82,49 +94,73 @@ Uwaga: M5 MAE wyższe niż M4 dla większości ćwiczeń — to efekt uczciwego 
 
 ## Ordering accuracy (eval_ordering.py)
 
-Wyniki z `deepgain_model_muscle_ord.pt` (M5, epoka 50). Probe: w=0.5 (mediana datasetu), r=0.27 (~8 reps), rir=0.4 (~RIR 2), mpc=1.0.
+Probe: w=0.5 (mediana datasetu), r=0.27 (~8 reps), rir=0.4 (~RIR 2), mpc=1.0.
 
-**MEAN: 93%** (M4: 90%)
+**M6 MEAN: 95%** | M5: 93% | M4: 90%
 
-| Ćwiczenie | M4 Acc | M5 Acc | Drops M5 (ordinal order) |
-|---|---:|---:|---|
-| deadlift | 67% | **67%** | erec(0.xxx) > ... — patrz eval_ordering.py |
-| incline_bench | 100% | **67%** | regresja vs M4 |
-| chest_press_machine | 100% | **67%** | regresja vs M4 |
-| dumbbell_flyes | 100% | **67%** | regresja vs M4 |
-| dips | 100% | **80%** | regresja vs M4 |
-| squat | 100% | **83%** | regresja vs M4 |
-| low_bar_squat | 100% | **83%** | regresja vs M4 |
-| lat_pulldown | 50% | **83%** | poprawa ✓ |
-| bird_dog | 0% | **100%** | poprawa ✓ |
-| high_bar_squat | 100% | **100%** | — |
-| sumo_deadlift | 100% | **100%** | — |
-| bench_press | 100% | **100%** | — |
-| close_grip_bench | 100% | **100%** | — |
-| spoto_press | 100% | **100%** | — |
-| incline_bench_45 | 100% | **100%** | — |
-| decline_bench | 100% | **100%** | — |
-| ohp | 100% | **100%** | — |
-| skull_crusher | 100% | **100%** | — |
-| bulgarian_split_squat | 67% | **100%** | poprawa ✓ |
-| leg_press | 100% | **100%** | — |
-| pendlay_row | 83% | **100%** | poprawa ✓ |
-| pull_up | 100% | **100%** | — |
-| reverse_fly | 100% | **100%** | — |
-| seal_row | 100% | **100%** | — |
-| farmers_walk | 100% | **100%** | — |
-| leg_raises | 100% | **100%** | — |
-| trx_bodysaw | — | **100%** | — |
-| suitcase_carry | 100% | **100%** | — |
-| **MEAN** | **90%** | **93%** | |
+| Ćwiczenie | M4 Acc | M5 Acc | M6 Acc | Δ M5→M6 |
+|---|---:|---:|---:|---|
+| deadlift | 67% | 67% | **67%** | — (problem danych) |
+| decline_bench | 100% | 100% | **67%** | regresja ↓ |
+| incline_bench | 100% | 67% | **100%** | poprawa ✓ |
+| chest_press_machine | 100% | 67% | **100%** | poprawa ✓ |
+| dumbbell_flyes | 100% | 67% | **83%** | poprawa ✓ |
+| dips | 100% | 80% | **100%** | poprawa ✓ |
+| squat | 100% | 83% | **100%** | poprawa ✓ |
+| low_bar_squat | 100% | 83% | **100%** | poprawa ✓ |
+| lat_pulldown | 50% | 83% | **100%** | poprawa ✓ |
+| bird_dog | 0% | 100% | **100%** | — |
+| high_bar_squat | 100% | 100% | **100%** | — |
+| sumo_deadlift | 100% | 100% | **100%** | — |
+| bench_press | 100% | 100% | **100%** | — |
+| close_grip_bench | 100% | 100% | **100%** | — |
+| spoto_press | 100% | 100% | **100%** | — |
+| incline_bench_45 | 100% | 100% | **100%** | — |
+| ohp | 100% | 100% | **100%** | — |
+| skull_crusher | 100% | 100% | **100%** | — |
+| bulgarian_split_squat | 67% | 100% | **100%** | — |
+| leg_press | 100% | 100% | **100%** | — |
+| pendlay_row | 83% | 100% | **100%** | — |
+| pull_up | 100% | 100% | **100%** | — |
+| reverse_fly | 100% | 100% | **100%** | — |
+| seal_row | 100% | 100% | **100%** | — |
+| farmers_walk | 100% | 100% | **100%** | — |
+| leg_raises | 100% | 100% | **100%** | — |
+| trx_bodysaw | — | 100% | **100%** | — |
+| suitcase_carry | 100% | 100% | **100%** | — |
+| **MEAN** | **90%** | **93%** | **95%** | |
 
-**Regresje** (M5 gorzej niż M4): incline_bench, chest_press_machine, dumbbell_flyes, dips, squat — wszystkie ćwiczenia klatka/nogi z wieloma mięśniami wtórnymi. minimum_drop_penalty poprawia rozróżnienie, ale nie na tyle żeby wyprzedzić M4 dla tych przypadków. Możliwe przyczyny: nowy per-user split daje inne przykłady w val, penalty coefficient 0.10 za niski dla tych ćwiczeń.
+**M6 poprawa vs M5:** incline_bench 67%→100%, chest_press_machine 67%→100%, dumbbell_flyes 67%→83%, dips 80%→100%, squat 83%→100%, low_bar_squat 83%→100%, lat_pulldown 83%→100%. Większy model nauczył się lepiej rozróżniać zmęczenie mięśni wtórnych (chest/triceps/quads) bez zmiany penalty.
 
-**Poprawa vs M4:** bird_dog 0%→100%, lat_pulldown 50%→83%, bulgarian_split_squat 67%→100%, pendlay_row 83%→100%.
+**Regresja M6:** decline_bench 100%→67% — prawdopodobnie statystyczny artefakt (mało próbek decline_bench w val secie konkretnych userów) lub zmiana kolejności przy nowym probe point.
 
-Szczegółowe drop values: uruchom `python eval_ordering.py` po treningu.
+**Deadlift** nadal 67% we wszystkich modelach — erectors dominuje, glutes/hamstrings bliskie zeru. To problem sygnału w danych (brak sekwencji deadlift→rdl→leg_curl), nie architektury. Większy model nie pomaga.
 
-## Obserwacje z wykresów
+Szczegółowe drop values: uruchom `python eval_ordering.py` po treningu (uwaga: zaktualizować HIDDEN_DIM=256).
+
+## Obserwacje z wykresów — M6 (`charts/20260417_1954/`)
+
+**`chart_muscle_breakdown.png` — per-muscle fatigue breakdown:**
+- Push exercises (bench, ohp, dips): poprawna kolejność ordinal ✓
+- Muscle collapse mniejszy niż M5 — triceps i anterior_delts mają widoczny drop dla bench press (wcześniej ~0). Większa pojemność modelu lepiej dystrybuuje fatigue.
+- Deadlift: erectors nadal dominuje — glutes/hamstrings pozostają zbyt małe (niefizjologiczne). Problem danych, nie modelu.
+- OHP: ante > lateral_delts > triceps — poprawna hierarchia ✓
+- Pendlay row: rear_delts dominuje — poprawnie ✓
+
+**`chart_transfer_matrix.png` — cross-exercise interference:**
+- Strukturalne push/pull oddzielenie wyraźniejsze niż M5 ✓
+- Ujemne wartości nadal obecne (artefakt modelu — f_net może produkować >1, po normalizacji daje ujemne transfery)
+
+**`chart_mpc_per_muscle_*.png` — MPC trajectories:**
+- Zębate wzorce drop+recovery fizjologicznie poprawne ✓
+- τ per muscle zgodne z literaturą ✓
+- Przebiegi bardziej zróżnicowane między mięśniami niż M5 — model lepiej rozróżnia specyficzny profil zmęczenia per ćwiczenie
+
+**`chart_fatigue_heatmaps.png`:**
+- Gradienty weight/reps bardziej płynne i zróżnicowane ✓
+- In-distribution maski (szare obszary) pokazują granice trenowanych zakresów
+
+## Obserwacje z wykresów — M5 (`charts/20260417_1540/`)
 
 **`chart_muscle_breakdown.png` — per-muscle fatigue breakdown:**
 - Push exercises (bench, ohp, dips): poprawna kolejność ordinal ✓
@@ -144,16 +180,14 @@ Szczegółowe drop values: uruchom `python eval_ordering.py` po treningu.
 
 ## Do zrobienia (Aleksander)
 
-- [ ] **Sekwencje cross-muscle** — regresja ordering w M5 dla incline_bench, chest_press_machine, dumbbell_flyes to sygnał że dataset nadal nie ma wystarczająco wyraźnego sygnału zmęczenia mięśni wtórnych. Priorytetowe pary do wzmocnienia:
+- [ ] **deadlift ordering** — nadal 67% we wszystkich modelach (M4/M5/M6). Erectors dominuje, glutes/hamstrings ~0. M6 (HIDDEN_DIM=256) nie pomógł → problem jest w danych, nie architekturze. Potrzebne sesje `deadlift → rdl → leg_curl` gdzie hamstrings/glutes zmęczenie jest wyraźnie widoczne w kolejnych seriach. To najwyższy priorytet bo deadlift jest kluczowym ćwiczeniem.
+
+- [ ] **Sekwencje cross-muscle** — M6 naprawił większość regresji M5 (incline_bench, chest_press_machine, dips, squat) bez zmiany danych, ale dumbbell_flyes nadal tylko 83%. Priorytetowe pary do dalszego wzmocnienia:
+  - `deadlift → rdl` (hamstrings wtórny → primary) — najważniejsze
   - `bench_press → skull_crusher` (triceps wtórny → primary)
-  - `bench_press → ohp` (anterior_delts wtórny → primary)
   - `incline_bench → dumbbell_flyes` (chest wtórny → primary)
   - `rdl → leg_curl` (hamstrings wtórny → primary)
-  - `squat → leg_press` (glutes wtórny → reinforcement)
-  - `deadlift → rdl` (hamstrings wtórny → primary)
 
-- [ ] **skull_crusher MAE** — wzrost 0.482 → 0.867 w M5. Sprawdzić czy sekwencje skull_crusher w nowym datasecie są reprezentatywne (wystarczająco dużo serii po bench_press gdzie triceps jest zmęczone).
+- [ ] **skull_crusher MAE** — wzrost 0.482 (M3) → 0.867 (M5) w czystym per-user splicie. Sprawdzić czy sekwencje skull_crusher w nowym datasecie są reprezentatywne (wystarczająco dużo serii po bench_press gdzie triceps jest zmęczone).
 
-- [ ] **deadlift ordering** — nadal 67% (erectors dominuje, glutes/hamstrings ~0). Sprawdzić ordering w YAML: czy hamstrings/glutes są wystarczająco wysoko. Ewentualnie więcej sesji deadlift → rdl → leg_curl gdzie hamstrings zmęczenie jest widoczne w kolejnych seriach.
-
-- [ ] **Rozkład realistyczny z floor** — każde ćwiczenie ≥1500–2000 wierszy w train secie. `seal_row` i podobne ćwiczenia niszowe były niedoreprezentowane.
+- [ ] **Rozkład realistyczny z floor** — każde ćwiczenie ≥1500–2000 wierszy w train secie. `seal_row`, `decline_bench` i podobne ćwiczenia niszowe mogą być niedoreprezentowane (decline_bench ordering regresja w M6 to możliwy sygnał).
