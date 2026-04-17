@@ -1,86 +1,93 @@
-# Train Report — Milestone 2
+# Train Report — Milestone 3
 
 ## Metryki
 
-| | Baseline (27 ćw.) | Milestone 2 (44 ćw.) |
-|---|---|---|
-| Val RMSE | 1.08 RIR | **1.005 RIR** |
-| MAE | 0.86 RIR | **0.789 RIR** |
-| R | 0.789 | **0.833** |
+| | Baseline (27 ćw.) | Milestone 2 (44 ćw.) | Milestone 3 (47 ćw., 17 mięśni) |
+|---|---|---|---|
+| Val RMSE | 1.08 RIR | 1.005 RIR | **0.845 RIR** |
+| MAE | 0.86 RIR | 0.789 RIR | **0.656 RIR** |
+| R | 0.789 | 0.833 | **0.884** |
 
-Dataset: `generated_datasets/baseline_main/` — 846k train / 218k val, 238/62 userów, 44 ćwiczenia.
+Dataset: `generated_datasets/baseline_main/` — 872k train / 225k val, 238/62 userów, 47 ćwiczeń.
+Checkpoint: `deepgain_model_best.pt` (najlepsza epoka: 116, val RMSE 0.845).
 
-## Co się zmieniło względem baseline
+## Co się zmieniło względem Milestone 2
 
-- Ordinal involvement z `exercise_muscle_order.yaml` (Aleksander) zamiast hardkodowanych wag numerycznych
-- `fatigue_ordering_penalty()` używa kolejności ordinalnej (primary → secondary → tertiary)
-- Nowe ćwiczenia z yaml dostają flat involvement 0.7 dla wszystkich mięśni z listy
-- τ (czas regeneracji) zamrożone z literatury
+- **`abs` jako 17. mięsień** (τ=10h) — ćwiczenia core teraz śledzą właściwy mięsień
+- **150 epok** zamiast 20 — model w pełni zwergowany
+- ord_pen → 0.0000 od ~epoki 90 — constraint ordinalny w pełni spełniony
+- 3 nowe ćwiczenia z yaml: `sumo_deadlift`, `ab_wheel`, `dead_bug`
+- Brak overfittingu: train RMSE 0.82 vs val RMSE 0.85 przez całe trenowanie
 
 ## Per-exercise MAE
 
-| Ćwiczenie | MAE |
-|---|---:|
-| low_bar_squat | 0.565 |
-| deadlift | 0.565 |
-| skull_crusher | 0.698 |
-| pendlay_row | 0.708 |
-| pull_up | 0.722 |
-| incline_bench_45 | 0.723 |
-| lat_pulldown | 0.743 |
-| spoto_press | 0.746 |
-| rdl | 0.747 |
-| high_bar_squat | 0.748 |
-| bulgarian_split_squat | 0.757 |
-| squat | 0.776 |
-| bench_press | 0.783 |
-| farmers_walk | 0.786 |
-| dumbbell_flyes | 0.790 |
-| ohp | 0.812 |
-| close_grip_bench | 0.823 |
-| leg_extension | 0.851 |
-| chest_press_machine | 0.859 |
-| leg_press | 0.863 |
-| incline_bench | 0.863 |
-| suitcase_carry | 0.877 |
-| seal_row | 0.886 |
-| leg_curl | 0.912 |
-| reverse_fly | 0.915 |
-| leg_raises | 0.958 |
-| bird_dog | 0.968 |
-| trx_bodysaw | 1.078 |
-| decline_bench | 1.211 |
-| dips | 1.414 |
+| Ćwiczenie | M2 MAE | M3 MAE | Δ |
+|---|---:|---:|---:|
+| low_bar_squat | 0.565 | **0.442** | -0.123 |
+| deadlift | 0.565 | **0.480** | -0.085 |
+| skull_crusher | 0.698 | **0.481** | -0.217 |
+| spoto_press | 0.746 | **0.590** | -0.156 |
+| incline_bench | 0.863 | **0.592** | -0.271 |
+| sumo_deadlift | — | **0.593** | nowe |
+| lat_pulldown | 0.743 | **0.610** | -0.133 |
+| seal_row | 0.886 | **0.611** | -0.275 |
+| close_grip_bench | 0.823 | **0.614** | -0.209 |
+| pendlay_row | 0.708 | **0.619** | -0.089 |
+| pull_up | 0.722 | **0.626** | -0.096 |
+| rdl | 0.747 | **0.631** | -0.116 |
+| high_bar_squat | 0.748 | **0.644** | -0.104 |
+| dips | 1.414 | **0.647** | **-0.767** |
+| bulgarian_split_squat | 0.757 | **0.656** | -0.101 |
+| bench_press | 0.783 | **0.664** | -0.119 |
+| incline_bench_45 | 0.723 | **0.675** | -0.048 |
+| leg_extension | 0.851 | **0.688** | -0.163 |
+| ohp | 0.812 | **0.692** | -0.120 |
+| dumbbell_flyes | 0.790 | **0.695** | -0.095 |
+| chest_press_machine | 0.859 | **0.711** | -0.148 |
+| decline_bench | 1.211 | **0.713** | **-0.498** |
+| squat | 0.776 | **0.717** | -0.059 |
+| leg_press | 0.863 | **0.718** | -0.145 |
+| farmers_walk | 0.786 | **0.724** | -0.062 |
+| leg_curl | 0.912 | **0.740** | -0.172 |
+| leg_raises | 0.958 | **0.776** | -0.182 |
+| suitcase_carry | 0.877 | **0.780** | -0.097 |
+| ab_wheel | — | **0.783** | nowe |
+| reverse_fly | 0.915 | **0.785** | -0.130 |
+| plank | — | **0.883** | nowe |
+| trx_bodysaw | 1.078 | **0.886** | -0.192 |
+| bird_dog | 0.968 | **0.923** | -0.045 |
+| dead_bug | — | **0.937** | nowe |
 
 ## Obserwacje z wykresów
 
 **`chart_muscle_breakdown.png` — per-muscle fatigue breakdown:**
-- Większość ćwiczeń: kolejność ordinal jest zachowana ✓
-- **Squat**: `glutes` prawie zerowy drop mimo secondary w yaml. Przyczyną jest niezgodność — w hardkodowanych wagach `glutes=0.60` (wysoko), ale yaml mówi `primary=[quads, erectors], secondary=[glutes]`. Model widzi wysoki involvement glutes w INVOLVEMENT_MATRIX i daje mały drop przez f_net — niespójność między macierzą a ordinal rankingiem.
-- **Deadlift**: `hamstrings` prawie zerowy mimo primary w yaml. Ta sama przyczyna — hardkodowane `hamstrings=0.55`, yaml primary=[erectors, glutes, hamstrings], ale model ignoruje hamstrings bo f_net nie dostaje sygnału żeby go uczyć proporcjonalnie.
+- Bench press: chest >> anterior_delts > triceps — kolejność ordinal zachowana ✓
+- OHP: anterior_delts > triceps > upper_traps > chest — poprawna hierarchia ✓
+- Pendlay row: rear_delts ≈ erectors ≈ rhomboids (flat 0.7 involvement dla nowego ćwiczenia) — brak hierarchii, ale symetryczne
+- **Squat**: quads dominuje (poprawnie), ale glutes drop nadal bardzo mały mimo `secondary` w yaml. Ten sam problem co w M2 — niespójność między hardkodowanym `glutes=0.60` w INVOLVEMENT_MATRIX a ordinal rankiem secondary
+- Dips: chest >> triceps > anterior_delts — fizjologicznie sensowne ✓
 
 **`chart_transfer_matrix.png` — cross-exercise interference:**
-- Struktura fizjologiczna poprawna (pchanie interferuje z pchaniem, ciągnięcie z ciągnięciem) ✓
-- `lat_pulldown → pull_up: -1.0` — artefakt, ujemna wartość jest nielogiczna (ćwiczenie nie może regenerować)
-- `dips → pull_up: 3.7` — za wysoka, dips to pchanie (klatka/triceps), pull_up to ciągnięcie (lats/biceps), mięśniowy overlap jest minimalny
+- Struktura push/pull ogólnie poprawna ✓
+- Ujemne wartości nadal obecne (bench_press→dips: -2.9, pendlay_row→pull_up: -3.2) — artefakt, fizjologicznie nielogiczne
+- rdl→deadlift: 4.4, deadlift→deadlift: 4.3 — autocorrelacja wysoka, poprawna
+- dips→pull_up: 0.6 (znacznie lepsza niż 3.7 z M2) ✓
 
 **`chart_mpc_per_muscle_*.png` — MPC trajectories:**
 - Zabki (drop + recovery) wyglądają fizjologicznie poprawnie ✓
-- τ per muscle zgodne z literaturą
+- abs (17. mięsień) pojawia się jako osobny panel ✓
+- τ per muscle zgodne z literaturą, bez anomalii
 
 ## Do zrobienia
 
-- [ ] **`abs` jako 17. mięsień**
-  - Problem: ćwiczenia core (plank, ab_wheel, bird_dog, trx_bodysaw, leg_raises) mają MAE ~1.0 bo model ma tylko 16 mięśni bez `abs` — te ćwiczenia trenują mięsień którego model nie śledzi
-  - Co trzeba: Aleksander potwierdza `abs` jako oficjalny muscle ID w yaml, ja dodaję go do `ALL_MUSCLES` w `train.py` (zmiana rozmiaru modelu z 16 na 17) i retrenujemy od zera
-  - Uwaga: to zmienia rozmiar modelu, stary checkpoint będzie niekompatybilny
+- [x] **`abs` jako 17. mięsień** — done. Core exercises poprawiły się: leg_raises 0.958→0.776, trx_bodysaw 1.078→0.886, bird_dog 0.968→0.923. dead_bug i ab_wheel (~0.9) to nowe ćwiczenia bez M2 baseline.
 
-- [ ] **Poprawić hardkodowane wagi dla squat i deadlift** (i ewentualnie innych ćwiczeń z yaml)
-  - Problem: `_EXERCISE_MUSCLES_HARDCODED` w `train.py` ma inne proporcje wag niż ordinal ranking w yaml Aleksandra. Dla squata: hardkodowane daje `glutes` wyżej niż `erectors`, ale yaml mówi odwrotnie. Dla deadlifta: `hamstrings` jest za nisko.
-  - Co trzeba: Aleksander przejrzy yaml i wskaże które ćwiczenia mają ewidentnie złe rankingi, albo da mi aktualne wagi numeryczne dla tych ćwiczeń — ja aktualizuję `_EXERCISE_MUSCLES_HARDCODED` i retrenujemy
-  - Alternatywnie: całkowite zastąpienie hardkodowanych wag przez wagi z yaml (wymaga dodania `involvement_weight` do yaml)
+- [ ] **Poprawić hardkodowane wagi dla squat i deadlift**
+  - Problem: squat glutes drop nadal minimalny w M3 mimo 150 epok — potwierdzone że to niespójność INVOLVEMENT_MATRIX (glutes=0.60) vs ordinal yaml (glutes=secondary). Model nie ma sygnału żeby uczyć glutes dropu bo f_net dostaje wysoki involvement bez gradientu ordinal.
+  - Co trzeba: Aleksander weryfikuje squat i deadlift w yaml (czy `primary=[quads, erectors]` dla squata jest zamierzone), potem aktualizujemy hardkody i retrenujemy
 
-- [ ] **Dips MAE 1.414 — najgorsze ćwiczenie**
-  - Problem: dips ma najwyższy błąd ze wszystkich ćwiczeń, i było też najgorsze w baseline (1.458)
-  - Co sprawdzić po stronie Aleksandra: czy dane dla dips w datasecie wyglądają sensownie (rozkład RIR, wag, reps)? Czy ordinal ranking w yaml jest poprawny? Może dips ma zbyt duże RIR variance w danych?
-  - Co można spróbować: zwiększyć liczbę serii dips w datasecie jeśli ich jest mało
+- [x] **Dips MAE 1.414 — rozwiązane**. MAE spadło z 1.414 do 0.647 po dodaniu abs i pełnym treningu. Prawdopodobna przyczyna M2: zbyt mało epok (20) + możliwy sygnał z core muscles overlap w datasecie.
+
+- [ ] **Ujemne wartości w transfer matrix** — strukturalny problem modelu. f_net może produkować wartości > 1 dla niektórych kombinacji, co po normalizacji daje ujemne transfery. Potencjalnie wymaga clampowania `f_net` output do [0, 1] range.
+
+- [ ] **bird_dog i dead_bug MAE ~0.93** — najgorsze pozostałe ćwiczenia. Flat 0.7 involvement (nowe ćwiczenia z yaml) może być zbyt słabym sygnałem. Warto sprawdzić czy Aleksander ma lepsze wagi dla tych ćwiczeń.

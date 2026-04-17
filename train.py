@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import os
 import warnings
 import time
+from datetime import datetime
 warnings.filterwarnings("ignore")
 
 if torch.cuda.is_available():
@@ -29,7 +30,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 32
 HIDDEN_DIM = 128
 LR = 1e-3
-EPOCHS = 20
+EPOCHS = 150
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -564,6 +565,7 @@ optimizer = optim.Adam([
     {'params': [p for p in model.parameters() if p.requires_grad], 'lr': LR},
 ], weight_decay=1e-5)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+best_val_loss = float("inf")
 
 train_losses = []
 val_losses = []
@@ -635,12 +637,14 @@ for epoch in range(EPOCHS):
     print(recovery_str, flush=True)
     print(tau_all_str, flush=True)
 
-    # Save checkpoint every epoch
-    torch.save(model.state_dict(), f"deepgain_model_muscle_ord_e{epoch+1}.pt")
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        torch.save(model.state_dict(), "deepgain_model_best.pt")
 
-# Save model
+# Save final model
 torch.save(model.state_dict(), "deepgain_model_muscle_ord.pt")
-print("\nModel saved to deepgain_model_muscle_ord.pt")
+print(f"\nModel saved to deepgain_model_muscle_ord.pt")
+print(f"Best val model saved to deepgain_model_best.pt (RMSE {np.sqrt(best_val_loss) * RIR_SCALE:.4f})")
 
 # ═══════════════════════════════════════════════════════════════════
 # EVALUATION
@@ -688,6 +692,10 @@ for ex, mae_val in sorted(exercise_maes.items(), key=lambda x: x[1]):
 # CHARTS
 # ═══════════════════════════════════════════════════════════════════
 
+CHART_DIR = os.path.join("charts", datetime.now().strftime("%Y%m%d_%H%M"))
+os.makedirs(CHART_DIR, exist_ok=True)
+print(f"Charts → {CHART_DIR}/")
+
 muscle_colors = plt.cm.tab20(np.linspace(0, 1, NUM_MUSCLES))
 
 # --- Chart 1: Loss Curves ---
@@ -701,7 +709,7 @@ ax.set_title("Training & Validation Loss")
 ax.legend()
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.savefig("charts/chart_loss_curves.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_loss_curves.png", dpi=150)
 print("Saved chart_loss_curves.png")
 
 # --- Chart 2: RIR Prediction Accuracy ---
@@ -744,7 +752,7 @@ ax.set_title(f"Error Distribution (mean={np.mean(errors):.3f}, std={np.std(error
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("charts/chart_rir_accuracy.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_rir_accuracy.png", dpi=150)
 print("Saved chart_rir_accuracy.png")
 
 # --- Chart 3: MPC Trajectories ---
@@ -807,7 +815,7 @@ for row, seq in enumerate(sample_users):
         ax.set_xlabel("Hours from first set")
 
 plt.tight_layout()
-plt.savefig("charts/chart_mpc_trajectories.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_mpc_trajectories.png", dpi=150)
 print("Saved chart_mpc_trajectories.png")
 
 # --- Chart 4: Recovery Curves ---
@@ -836,7 +844,7 @@ ax.legend(fontsize=7, ncol=4, loc="lower right")
 ax.set_ylim(0.4, 1.05)
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.savefig("charts/chart_recovery_curves.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_recovery_curves.png", dpi=150)
 print("Saved chart_recovery_curves.png")
 
 # --- Chart 5: Fatigue Heatmaps ---
@@ -878,7 +886,7 @@ with torch.no_grad():
 
 plt.suptitle("Fatigue Response (f) at RIR 2, MPC=1.0", fontsize=14, y=1.02)
 plt.tight_layout()
-plt.savefig("charts/chart_fatigue_heatmaps.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_fatigue_heatmaps.png", dpi=150)
 print("Saved chart_fatigue_heatmaps.png")
 
 # ── Chart 6: Cross-exercise fatigue transfer matrix ──────────────────────────
@@ -929,7 +937,7 @@ for i in range(n):
         ax.text(j, i, f"{tmat[i, j]:.1f}", ha="center", va="center", fontsize=8, color=c)
 plt.colorbar(im, ax=ax, label="RIR decrease", shrink=0.8)
 plt.tight_layout()
-plt.savefig("charts/chart_transfer_matrix.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_transfer_matrix.png", dpi=150)
 print("Saved chart_transfer_matrix.png")
 
 # ── Chart 7: Per-muscle fatigue breakdown ────────────────────────────────────
@@ -967,7 +975,7 @@ with torch.no_grad():
             ax.text(d + 0.001, i, f"inv={ms[m]:.2f}", va="center", fontsize=7, color="gray")
 plt.suptitle("Learned Fatigue (f) — Per-Muscle Breakdown", fontsize=14)
 plt.tight_layout()
-plt.savefig("charts/chart_muscle_breakdown.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_muscle_breakdown.png", dpi=150)
 print("Saved chart_muscle_breakdown.png")
 
 # ── Chart 8: RIR sensitivity per exercise ────────────────────────────────────
@@ -1003,7 +1011,7 @@ with torch.no_grad():
         ax.grid(True, alpha=0.3, axis="x")
 plt.suptitle("RIR Sensitivity (g) — Which Muscle Fatigue Affects RIR Most?", fontsize=14)
 plt.tight_layout()
-plt.savefig("charts/chart_rir_sensitivity.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_rir_sensitivity.png", dpi=150)
 print("Saved chart_rir_sensitivity.png")
 
 # ── Chart 9: MPC per muscle per user (per-muscle subplots, smooth recovery) ──
@@ -1076,7 +1084,7 @@ for seq in sample_users:
         ax.set_visible(False)
 
     plt.tight_layout()
-    plt.savefig(f"charts/chart_mpc_per_muscle_{uid}.png", dpi=150)
+    plt.savefig(f"{CHART_DIR}/chart_mpc_per_muscle_{uid}.png", dpi=150)
     print(f"Saved chart_mpc_per_muscle_{uid}.png")
 
 print("\nDone! All charts saved.")
