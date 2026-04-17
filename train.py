@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import os
 import warnings
 import time
+from datetime import datetime
 warnings.filterwarnings("ignore")
 
 if torch.cuda.is_available():
@@ -29,7 +30,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 32
 HIDDEN_DIM = 128
 LR = 1e-3
-EPOCHS = 20
+EPOCHS = 150
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -37,10 +38,11 @@ REPS_SCALE = 30.0
 RIR_SCALE = 5.0
 DT_SCALE = np.log1p(168.0)
 
-# ─── Muscles (16 groups) ───
+# ─── Muscles (15 groups) ───
+# upper_traps and brachialis removed: no direct EMG columns in current CSV schema
 ALL_MUSCLES = [
     "chest", "anterior_delts", "lateral_delts", "rear_delts",
-    "upper_traps", "rhomboids", "triceps", "biceps", "brachialis",
+    "rhomboids", "triceps", "biceps",
     "lats", "quads", "hamstrings", "glutes", "adductors", "erectors", "calves",
     "abs",
 ]
@@ -53,88 +55,80 @@ _EXERCISE_MUSCLES_HARDCODED = {
     # - coefficients are relative involvement strengths in ~[0, 1]
     # - they are not normalized probabilities and do not need to sum to 1
     # - they directly modulate MPC drop via involvement * drop
-    "bench_press":        {"chest": 0.85, "triceps": 0.55, "anterior_delts": 0.60},
-    "incline_bench":      {"chest": 0.70, "anterior_delts": 0.75, "triceps": 0.50},
-    "close_grip_bench":   {"chest": 0.65, "triceps": 0.75, "anterior_delts": 0.55},
-    "spoto_press":        {"chest": 0.75, "triceps": 0.70, "anterior_delts": 0.45},
-    "incline_bench_45":   {"chest": 0.72, "triceps": 0.68, "anterior_delts": 0.55},
-    "decline_bench":      {"chest": 0.78, "triceps": 0.72, "anterior_delts": 0.40},
-    "chest_press_machine": {"chest": 0.72, "anterior_delts": 0.45, "triceps": 0.30},
-    "dumbbell_bench":     {"chest": 0.82, "triceps": 0.45, "anterior_delts": 0.55},
-    "ohp":                {"anterior_delts": 0.85, "triceps": 0.65, "chest": 0.20, "upper_traps": 0.40},
-    "dumbbell_ohp":       {"anterior_delts": 0.80, "triceps": 0.60, "upper_traps": 0.35},
-    "dips":               {"chest": 0.70, "triceps": 0.65, "anterior_delts": 0.45},
-    "dumbbell_flyes":     {"chest": 0.82, "anterior_delts": 0.30},
-    "skull_crusher":      {"triceps": 0.85, "anterior_delts": 0.25},
-    "barbell_row":        {"lats": 0.80, "biceps": 0.55, "rear_delts": 0.50, "erectors": 0.40, "upper_traps": 0.35, "rhomboids": 0.45},
-    "pendlay_row":        {"rear_delts": 0.82, "erectors": 0.70, "rhomboids": 0.60, "lats": 0.52},
-    "lat_pulldown":       {"lats": 0.75, "biceps": 0.50, "rear_delts": 0.35, "rhomboids": 0.40},
-    "cable_row":          {"lats": 0.70, "biceps": 0.45, "rear_delts": 0.40, "rhomboids": 0.50, "upper_traps": 0.30},
-    "pull_up":            {"lats": 0.82, "biceps": 0.55, "rear_delts": 0.35, "rhomboids": 0.40},
-    "reverse_fly":        {"rear_delts": 0.88, "lateral_delts": 0.65},
-    "seal_row":           {"rear_delts": 0.78, "rhomboids": 0.72, "lats": 0.52, "erectors": 0.25},
-    "squat":              {"quads": 0.85, "glutes": 0.60, "hamstrings": 0.35, "erectors": 0.45, "adductors": 0.40},
-    "low_bar_squat":      {"adductors": 0.75, "erectors": 0.70, "glutes": 0.55, "quads": 0.45},
-    "high_bar_squat":     {"quads": 0.82, "glutes": 0.62, "erectors": 0.40},
-    "front_squat":        {"quads": 0.90, "glutes": 0.50, "erectors": 0.55, "adductors": 0.35},
-    "deadlift":           {"glutes": 0.70, "hamstrings": 0.55, "erectors": 0.80, "quads": 0.40, "upper_traps": 0.50, "lats": 0.30, "adductors": 0.35},
-    "sumo_deadlift":      {"quads": 0.70, "glutes": 0.60, "erectors": 0.52, "adductors": 0.45, "hamstrings": 0.40, "abs": 0.65, "calves": 0.30},
-    "rdl":                {"hamstrings": 0.80, "glutes": 0.55, "erectors": 0.50, "adductors": 0.25},
-    "leg_press":          {"quads": 0.80, "glutes": 0.50, "adductors": 0.35},
+    # upper_traps and brachialis removed from all entries (no longer in ALL_MUSCLES)
+    "bench_press":           {"chest": 0.85, "triceps": 0.55, "anterior_delts": 0.60},
+    "incline_bench":         {"chest": 0.70, "anterior_delts": 0.75, "triceps": 0.50},
+    "incline_bench_45":      {"chest": 0.72, "triceps": 0.68, "anterior_delts": 0.55},
+    "close_grip_bench":      {"chest": 0.65, "triceps": 0.75, "anterior_delts": 0.55},
+    "spoto_press":           {"chest": 0.75, "triceps": 0.70, "anterior_delts": 0.45},
+    "decline_bench":         {"chest": 0.78, "triceps": 0.72, "anterior_delts": 0.40},
+    "chest_press_machine":   {"chest": 0.72, "anterior_delts": 0.45, "triceps": 0.30},
+    "dumbbell_bench":        {"chest": 0.82, "triceps": 0.45, "anterior_delts": 0.55},
+    "dumbbell_flyes":        {"chest": 0.82, "anterior_delts": 0.30},
+    "ohp":                   {"anterior_delts": 0.85, "triceps": 0.65, "chest": 0.20},
+    "dumbbell_ohp":          {"anterior_delts": 0.80, "triceps": 0.60},
+    "dips":                  {"chest": 0.70, "triceps": 0.65, "anterior_delts": 0.45},
+    "skull_crusher":         {"triceps": 0.85, "anterior_delts": 0.25},
+    "barbell_row":           {"lats": 0.80, "biceps": 0.55, "rear_delts": 0.50, "erectors": 0.40, "rhomboids": 0.45},
+    "pendlay_row":           {"rear_delts": 0.82, "erectors": 0.70, "rhomboids": 0.60, "lats": 0.52},
+    "seal_row":              {"rear_delts": 0.78, "rhomboids": 0.72, "lats": 0.52, "erectors": 0.25},
+    "lat_pulldown":          {"lats": 0.75, "biceps": 0.50, "rear_delts": 0.35, "rhomboids": 0.40},
+    "cable_row":             {"lats": 0.70, "biceps": 0.45, "rear_delts": 0.40, "rhomboids": 0.50},
+    "pull_up":               {"lats": 0.82, "biceps": 0.55, "rear_delts": 0.35, "rhomboids": 0.40},
+    "reverse_fly":           {"rear_delts": 0.88, "lateral_delts": 0.65},
+    "squat":                 {"quads": 0.85, "glutes": 0.60, "hamstrings": 0.35, "erectors": 0.45, "adductors": 0.40},
+    "low_bar_squat":         {"adductors": 0.75, "erectors": 0.70, "glutes": 0.55, "quads": 0.45},
+    "high_bar_squat":        {"quads": 0.82, "glutes": 0.62, "erectors": 0.40},
+    "front_squat":           {"quads": 0.90, "glutes": 0.50, "erectors": 0.55, "adductors": 0.35},
+    "deadlift":              {"glutes": 0.70, "hamstrings": 0.55, "erectors": 0.80, "quads": 0.40, "lats": 0.30, "adductors": 0.35},
+    "sumo_deadlift":         {"quads": 0.70, "glutes": 0.60, "erectors": 0.52, "adductors": 0.45, "hamstrings": 0.40, "abs": 0.65, "calves": 0.30},
+    "rdl":                   {"hamstrings": 0.80, "glutes": 0.55, "erectors": 0.50, "adductors": 0.25},
+    "leg_press":             {"quads": 0.80, "glutes": 0.50, "adductors": 0.35},
     "bulgarian_split_squat": {"quads": 0.80, "glutes": 0.65, "hamstrings": 0.30, "adductors": 0.40},
-    "hip_thrust":         {"glutes": 0.85, "hamstrings": 0.40, "adductors": 0.30},
-    "tricep_pushdown":    {"triceps": 0.90},
-    "overhead_tricep_ext": {"triceps": 0.85},
-    "bicep_curl":         {"biceps": 0.90},
-    "hammer_curl":        {"biceps": 0.75, "brachialis": 0.60},
-    "lateral_raise":      {"lateral_delts": 0.85, "upper_traps": 0.30},
-    "face_pull":          {"rear_delts": 0.70, "upper_traps": 0.40, "rhomboids": 0.35},
-    "leg_curl":           {"hamstrings": 0.85},
-    "leg_extension":      {"quads": 0.85},
-    "calf_raise":         {"calves": 0.90},
-    "plank":              {"abs": 0.82},
-    "farmers_walk":       {"erectors": 0.70, "abs": 0.52},
-    "leg_raises":         {"abs": 0.82, "lats": 0.32, "quads": 0.28, "erectors": 0.22},
-    "ab_wheel":           {"abs": 0.88},
-    "dead_bug":           {"abs": 0.62},
-    "trx_bodysaw":        {"abs": 0.85, "erectors": 0.15},
-    "suitcase_carry":     {"abs": 0.75, "erectors": 0.65},
-    "bird_dog":           {"glutes": 0.72, "erectors": 0.68},
+    "hip_thrust":            {"glutes": 0.85, "hamstrings": 0.40, "adductors": 0.30},
+    "tricep_pushdown":       {"triceps": 0.90},
+    "overhead_tricep_ext":   {"triceps": 0.85},
+    "bicep_curl":            {"biceps": 0.90},
+    "hammer_curl":           {"biceps": 0.75},
+    "lateral_raise":         {"lateral_delts": 0.85},
+    "face_pull":             {"rear_delts": 0.70, "rhomboids": 0.35},
+    "leg_curl":              {"hamstrings": 0.85},
+    "leg_extension":         {"quads": 0.85},
+    "calf_raise":            {"calves": 0.90},
+    "plank":                 {"abs": 0.82},
+    "farmers_walk":          {"erectors": 0.70, "abs": 0.52},
+    "leg_raises":            {"abs": 0.82, "lats": 0.32, "quads": 0.28, "erectors": 0.22},
+    "ab_wheel":              {"abs": 0.88},
+    "dead_bug":              {"abs": 0.62},
+    "trx_bodysaw":           {"abs": 0.85, "erectors": 0.15},
+    "suitcase_carry":        {"abs": 0.75, "erectors": 0.65},
+    "bird_dog":              {"glutes": 0.72, "erectors": 0.68},
 }
 
 _SCALED_WEIGHTS_PATH = "exercise_muscle_weights_scaled.csv"
 
 
 def _load_scaled_weights(csv_path: str = _SCALED_WEIGHTS_PATH):
-    """Load exercise->muscle weights in [0,1] from generated CSV.
+    """Load exercise->muscle weights in [0,1] from EMG-derived CSV.
 
-    Expected schema:
-      - exercise_id
-      - one column per muscle id in ALL_MUSCLES
+    Priority source: replaces flat 0.7 fallback for exercises in YAML.
+    Expected schema: exercise_id + one column per muscle id in ALL_MUSCLES.
     """
     if not os.path.exists(csv_path):
         return {}
-
     try:
         df = pd.read_csv(csv_path)
     except Exception as exc:
         print(f"Warning: could not read {csv_path}: {exc}")
         return {}
-
-    required = {"exercise_id", *ALL_MUSCLES}
-    missing = [c for c in required if c not in df.columns]
+    missing = [m for m in ALL_MUSCLES if m not in df.columns]
     if missing:
-        print(f"Warning: {csv_path} missing columns: {missing}")
+        print(f"Warning: {csv_path} missing muscle columns: {missing}")
         return {}
-
     weights = {}
     for _, row in df.iterrows():
         ex_id = str(row["exercise_id"])
-        ex_weights = {}
-        for m in ALL_MUSCLES:
-            v = float(row[m])
-            if v > 0.0:
-                ex_weights[m] = float(np.clip(v, 0.0, 1.0))
+        ex_weights = {m: float(np.clip(row[m], 0.0, 1.0)) for m in ALL_MUSCLES if float(row[m]) > 0.0}
         if ex_weights:
             weights[ex_id] = ex_weights
     return weights
@@ -171,13 +165,10 @@ def _load_exercise_data(yaml_path: str = "exercise_muscle_order.yaml"):
 
     scaled_weights = _load_scaled_weights()
 
-    # When YAML is present, treat it as the canonical exercise list.
-    # This prevents legacy hardcoded-only exercises from leaking into training.
+    # YAML is the canonical exercise list — only exercises present in YAML are used.
     exercise_muscles = {}
     exercise_ordinal = {}
-    scaled_used = 0
-    hardcoded_used = 0
-    fallback_used = 0
+    scaled_used = hardcoded_used = fallback_used = 0
 
     for ex_id, ex_data in data["exercises"].items():
         if not isinstance(ex_data, dict):
@@ -194,34 +185,19 @@ def _load_exercise_data(yaml_path: str = "exercise_muscle_order.yaml"):
             continue
         exercise_ordinal[ex_id] = valid_ranked
 
+        # Priority: EMG CSV → hardcoded literature → flat 0.7 fallback
         if ex_id in scaled_weights:
             exercise_muscles[ex_id] = scaled_weights[ex_id]
             scaled_used += 1
-            continue
+        elif ex_id in _EXERCISE_MUSCLES_HARDCODED:
+            exercise_muscles[ex_id] = _EXERCISE_MUSCLES_HARDCODED[ex_id]
+            hardcoded_used += 1
+        else:
+            exercise_muscles[ex_id] = {m: 0.7 for m in valid_ranked}
+            fallback_used += 1
 
-        if ex_id in _EXERCISE_MUSCLES_HARDCODED:
-            # Keep curated numeric coefficients where available.
-            # Drop any muscles not present in current ALL_MUSCLES.
-            filtered = {
-                m: c
-                for m, c in _EXERCISE_MUSCLES_HARDCODED[ex_id].items()
-                if m in MUSCLE_TO_IDX
-            }
-            if filtered:
-                exercise_muscles[ex_id] = filtered
-                hardcoded_used += 1
-                continue
-
-        # Fallback for YAML exercises without curated numeric weights.
-        exercise_muscles[ex_id] = {m: 0.7 for m in valid_ranked}
-        fallback_used += 1
-
-    updated = len(exercise_ordinal)
-    print(
-        f"Exercise data: YAML exercises from {yaml_path} ({updated} total); "
-        f"weights sources -> scaled_csv={scaled_used}, "
-        f"hardcoded={hardcoded_used}, fallback={fallback_used}"
-    )
+    print(f"Exercise data: {yaml_path} — {len(exercise_muscles)} exercises "
+          f"(csv={scaled_used}, hardcoded={hardcoded_used}, fallback={fallback_used})")
     return exercise_muscles, exercise_ordinal
 
 
@@ -257,9 +233,9 @@ def _load_split(path):
     return df
 
 _SPLIT_CANDIDATES = [
+    ("training_data_train.csv", "training_data_val.csv"),
     ("generated_datasets/baseline_main/training_data_train.csv",
      "generated_datasets/baseline_main/training_data_val.csv"),
-    ("training_data_train.csv", "training_data_val.csv"),
 ]
 
 print("Loading data...")
@@ -425,17 +401,20 @@ class ExponentialRecovery(nn.Module):
 
     r(MPC, Δt, muscle) = 1 - (1 - MPC) · exp(-Δt / τ_m)
 
-    Path-consistent by construction. 16 learnable parameters.
+    Path-consistent by construction. 15 learnable parameters.
 
     Soft ordering penalty: mean(small τ) < mean(medium τ) < mean(large τ)
-    Small:  triceps, biceps, brachialis, calves, rear_delts, lateral_delts
-    Medium: chest, anterior_delts, upper_traps, rhomboids, lats, erectors
+    Small:  triceps, biceps, calves, rear_delts, lateral_delts, abs
+    Medium: chest, anterior_delts, rhomboids, lats, erectors
     Large:  quads, hamstrings, glutes, adductors
     """
-    # Muscle indices by size bucket (matches ALL_MUSCLES ordering)
-    SMALL_IDX  = [6, 7, 8, 15, 3, 2, 16]  # triceps, biceps, brachialis, calves, rear_delts, lateral_delts, abs
-    MEDIUM_IDX = [0, 1, 4, 5, 9, 14]    # chest, anterior_delts, upper_traps, rhomboids, lats, erectors
-    LARGE_IDX  = [10, 11, 12, 13]        # quads, hamstrings, glutes, adductors
+    # Muscle indices by size bucket (matches ALL_MUSCLES ordering, 15 muscles)
+    # chest=0, anterior_delts=1, lateral_delts=2, rear_delts=3, rhomboids=4,
+    # triceps=5, biceps=6, lats=7, quads=8, hamstrings=9, glutes=10,
+    # adductors=11, erectors=12, calves=13, abs=14
+    SMALL_IDX  = [5, 6, 13, 3, 2, 14]   # triceps, biceps, calves, rear_delts, lateral_delts, abs
+    MEDIUM_IDX = [0, 1, 4, 7, 12]       # chest, anterior_delts, rhomboids, lats, erectors
+    LARGE_IDX  = [8, 9, 10, 11]         # quads, hamstrings, glutes, adductors
 
     # Literature-derived τ values (hours) — averaged from two deep-research studies
     # Fixed, not learned. Based on MVC/velocity/torque recovery data from 15+ papers.
@@ -444,11 +423,9 @@ class ExponentialRecovery(nn.Module):
         13.0,  # anterior_delts — bench synergist data
         9.0,   # lateral_delts — Korak 2015, training frequency data
         8.0,   # rear_delts — training frequency heuristics
-        9.0,   # upper_traps — fiber type, postural role
         10.0,  # rhomboids — fiber type, rowing data
         9.0,   # triceps — Ferreira 2017a, Korak 2015
         13.0,  # biceps — Soares 2015, Clark 2020
-        13.0,  # brachialis — assumed equal to biceps
         13.0,  # lats — Soares 2015, Korak 2015
         19.0,  # quads — Raastad 2000, Pareja-Blanco 2019, Thomas 2018
         18.0,  # hamstrings — Okazaki 2021, sprint studies
@@ -657,6 +634,7 @@ optimizer = optim.Adam([
     {'params': [p for p in model.parameters() if p.requires_grad], 'lr': LR},
 ], weight_decay=1e-5)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+best_val_loss = float("inf")
 
 train_losses = []
 val_losses = []
@@ -728,12 +706,14 @@ for epoch in range(EPOCHS):
     print(recovery_str, flush=True)
     print(tau_all_str, flush=True)
 
-    # Save checkpoint every epoch
-    torch.save(model.state_dict(), f"deepgain_model_muscle_ord_e{epoch+1}.pt")
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        torch.save(model.state_dict(), "deepgain_model_best.pt")
 
-# Save model
+# Save final model
 torch.save(model.state_dict(), "deepgain_model_muscle_ord.pt")
-print("\nModel saved to deepgain_model_muscle_ord.pt")
+print(f"\nModel saved to deepgain_model_muscle_ord.pt")
+print(f"Best val model saved to deepgain_model_best.pt (RMSE {np.sqrt(best_val_loss) * RIR_SCALE:.4f})")
 
 # ═══════════════════════════════════════════════════════════════════
 # EVALUATION
@@ -777,9 +757,51 @@ print(f"\nPer-exercise MAE:")
 for ex, mae_val in sorted(exercise_maes.items(), key=lambda x: x[1]):
     print(f"  {ex:25s}: {mae_val:.3f}")
 
+# ── Ordering accuracy per exercise ───────────────────────────────────────────
+print(f"\nOrdering accuracy per exercise (% pairs where primary muscle drops more):")
+model.eval()
+ordering_results = {}
+with torch.no_grad():
+    w   = torch.tensor([0.4],  dtype=torch.float32, device=DEVICE)
+    r   = torch.tensor([0.27], dtype=torch.float32, device=DEVICE)
+    rir = torch.tensor([0.4],  dtype=torch.float32, device=DEVICE)
+    mpc = torch.tensor([1.0],  dtype=torch.float32, device=DEVICE)
+    for ei, ex_id in enumerate(ALL_EXERCISES):
+        ordinal = EXERCISE_ORDINAL.get(ex_id, [])
+        if len(ordinal) < 2:
+            continue
+        e_embed = model.exercise_embed(torch.tensor([ei], device=DEVICE))
+        drops = {}
+        for m_id in ordinal:
+            if m_id not in MUSCLE_TO_IDX:
+                continue
+            mi = MUSCLE_TO_IDX[m_id]
+            m_embed = model.muscle_embed(torch.tensor([mi], device=DEVICE))
+            drops[m_id] = model.f_net(w, r, rir, mpc, e_embed, m_embed).item()
+        ranked = [m for m in ordinal if m in drops]
+        if len(ranked) < 2:
+            continue
+        correct = total = 0
+        for i in range(len(ranked)):
+            for j in range(i + 1, len(ranked)):
+                # rank[i] < rank[j] → drops[ranked[i]] should be > drops[ranked[j]]
+                if drops[ranked[i]] > drops[ranked[j]]:
+                    correct += 1
+                total += 1
+        ordering_results[ex_id] = correct / total if total > 0 else float("nan")
+
+for ex, acc in sorted(ordering_results.items(), key=lambda x: x[1]):
+    print(f"  {ex:25s}: {acc*100:.0f}%")
+overall_acc = np.mean(list(ordering_results.values()))
+print(f"  {'MEAN':25s}: {overall_acc*100:.0f}%")
+
 # ═══════════════════════════════════════════════════════════════════
 # CHARTS
 # ═══════════════════════════════════════════════════════════════════
+
+CHART_DIR = os.path.join("charts", datetime.now().strftime("%Y%m%d_%H%M"))
+os.makedirs(CHART_DIR, exist_ok=True)
+print(f"Charts → {CHART_DIR}/")
 
 muscle_colors = plt.cm.tab20(np.linspace(0, 1, NUM_MUSCLES))
 
@@ -794,7 +816,7 @@ ax.set_title("Training & Validation Loss")
 ax.legend()
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.savefig("charts/chart_loss_curves.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_loss_curves.png", dpi=150)
 print("Saved chart_loss_curves.png")
 
 # --- Chart 2: RIR Prediction Accuracy ---
@@ -837,12 +859,16 @@ ax.set_title(f"Error Distribution (mean={np.mean(errors):.3f}, std={np.std(error
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("charts/chart_rir_accuracy.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_rir_accuracy.png", dpi=150)
 print("Saved chart_rir_accuracy.png")
 
 # --- Chart 3: MPC Trajectories ---
 test_sequences = build_user_sequences(test_df)
-sample_users = sorted(test_sequences, key=lambda s: len(s["exercise_idx"]), reverse=True)[:3]
+_pinned_ids = {"user_00030", "user_00111"}
+_pinned = [s for s in test_sequences if s["user_id"] in _pinned_ids]
+_rest   = [s for s in test_sequences if s["user_id"] not in _pinned_ids]
+_best_rest = sorted(_rest, key=lambda s: len(s["exercise_idx"]), reverse=True)[:1]
+sample_users = (_pinned + _best_rest)[:3]
 
 model.eval()
 fig, axes = plt.subplots(3, 2, figsize=(20, 18))
@@ -900,7 +926,7 @@ for row, seq in enumerate(sample_users):
         ax.set_xlabel("Hours from first set")
 
 plt.tight_layout()
-plt.savefig("charts/chart_mpc_trajectories.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_mpc_trajectories.png", dpi=150)
 print("Saved chart_mpc_trajectories.png")
 
 # --- Chart 4: Recovery Curves ---
@@ -929,11 +955,11 @@ ax.legend(fontsize=7, ncol=4, loc="lower right")
 ax.set_ylim(0.4, 1.05)
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.savefig("charts/chart_recovery_curves.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_recovery_curves.png", dpi=150)
 print("Saved chart_recovery_curves.png")
 
 # --- Chart 5: Fatigue Heatmaps ---
-probe_exercises = ["bench_press", "squat", "bicep_curl"]
+probe_exercises = ["bench_press", "squat", "deadlift"]
 weight_range = np.linspace(0.1, 1.0, 30)
 reps_range = np.linspace(0.03, 0.5, 30)
 
@@ -971,7 +997,7 @@ with torch.no_grad():
 
 plt.suptitle("Fatigue Response (f) at RIR 2, MPC=1.0", fontsize=14, y=1.02)
 plt.tight_layout()
-plt.savefig("charts/chart_fatigue_heatmaps.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_fatigue_heatmaps.png", dpi=150)
 print("Saved chart_fatigue_heatmaps.png")
 
 # ── Chart 6: Cross-exercise fatigue transfer matrix ──────────────────────────
@@ -1022,7 +1048,7 @@ for i in range(n):
         ax.text(j, i, f"{tmat[i, j]:.1f}", ha="center", va="center", fontsize=8, color=c)
 plt.colorbar(im, ax=ax, label="RIR decrease", shrink=0.8)
 plt.tight_layout()
-plt.savefig("charts/chart_transfer_matrix.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_transfer_matrix.png", dpi=150)
 print("Saved chart_transfer_matrix.png")
 
 # ── Chart 7: Per-muscle fatigue breakdown ────────────────────────────────────
@@ -1060,7 +1086,7 @@ with torch.no_grad():
             ax.text(d + 0.001, i, f"inv={ms[m]:.2f}", va="center", fontsize=7, color="gray")
 plt.suptitle("Learned Fatigue (f) — Per-Muscle Breakdown", fontsize=14)
 plt.tight_layout()
-plt.savefig("charts/chart_muscle_breakdown.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_muscle_breakdown.png", dpi=150)
 print("Saved chart_muscle_breakdown.png")
 
 # ── Chart 8: RIR sensitivity per exercise ────────────────────────────────────
@@ -1096,7 +1122,7 @@ with torch.no_grad():
         ax.grid(True, alpha=0.3, axis="x")
 plt.suptitle("RIR Sensitivity (g) — Which Muscle Fatigue Affects RIR Most?", fontsize=14)
 plt.tight_layout()
-plt.savefig("charts/chart_rir_sensitivity.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_rir_sensitivity.png", dpi=150)
 print("Saved chart_rir_sensitivity.png")
 
 # ── Chart 9: MPC per muscle per user (per-muscle subplots, smooth recovery) ──
@@ -1169,7 +1195,7 @@ for seq in sample_users:
         ax.set_visible(False)
 
     plt.tight_layout()
-    plt.savefig(f"charts/chart_mpc_per_muscle_{uid}.png", dpi=150)
+    plt.savefig(f"{CHART_DIR}/chart_mpc_per_muscle_{uid}.png", dpi=150)
     print(f"Saved chart_mpc_per_muscle_{uid}.png")
 
 print("\nDone! All charts saved.")

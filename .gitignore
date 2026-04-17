@@ -5,6 +5,6 @@ __pycache__/
 training_data.csv
 train_output.log
 chart_*.png
-!charts/chart_*.png
+!charts/**/chart_*.png
 .claude/
 *.pt
