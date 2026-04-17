@@ -198,10 +198,18 @@ def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
     if device is None:
         device = _DEFAULT_DEVICE
     model = DeepGainModel(NUM_EXERCISES, NUM_MUSCLES, EMBED_DIM, HIDDEN_DIM)
-    state_dict = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    model.load_state_dict(state_dict)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model.load_state_dict(ckpt.get("model_state_dict", ckpt))
     model = model.to(device)
     model.eval()
+    # Attach per-exercise weight normalization ranges (saved since M5)
+    # Falls back to global WEIGHT_SCALE for older checkpoints.
+    if "weight_p5" in ckpt and "weight_p95" in ckpt:
+        model.weight_p5  = np.asarray(ckpt["weight_p5"],  dtype=np.float32)
+        model.weight_p95 = np.asarray(ckpt["weight_p95"], dtype=np.float32)
+    else:
+        model.weight_p5  = None
+        model.weight_p95 = None
     return model
 
 
@@ -251,7 +259,7 @@ def predict_mpc(
             continue
         valid.append({
             "exercise_idx": EXERCISE_TO_IDX[ex],
-            "weight":  float(entry["weight_kg"]) / WEIGHT_SCALE,
+            "weight":  _normalize_weight(model, float(entry["weight_kg"]), EXERCISE_TO_IDX[ex]),
             "reps":    float(entry["reps"]) / REPS_SCALE,
             "rir":     float(entry["rir"]) / RIR_SCALE,
             "timestamp": ts,
@@ -352,7 +360,7 @@ def predict_rir(
 
     mpc_vals = [state.get(m, 1.0) for m in ALL_MUSCLES]
     mpc_t = torch.tensor([mpc_vals], dtype=torch.float32, device=device)   # (1, M)
-    w_t   = torch.tensor([weight / WEIGHT_SCALE], dtype=torch.float32, device=device)
+    w_t   = torch.tensor([_normalize_weight(model, weight, EXERCISE_TO_IDX[exercise])], dtype=torch.float32, device=device)
     r_t   = torch.tensor([reps / REPS_SCALE],     dtype=torch.float32, device=device)
     ei    = torch.tensor([EXERCISE_TO_IDX[exercise]], dtype=torch.long, device=device)
     e_emb = model.exercise_embed(ei)                                         # (1, E)
@@ -373,6 +381,15 @@ def get_muscles() -> list[str]:
 def get_exercises() -> list[str]:
     """Return all exercise IDs recognized by the current model."""
     return list(ALL_EXERCISES)
+
+
+def _normalize_weight(model: "DeepGainModel", weight_kg: float, exercise_idx: int) -> float:
+    """Normalize weight using per-exercise p5/p95 if available, else global scale."""
+    if model.weight_p5 is not None:
+        p5  = float(model.weight_p5[exercise_idx])
+        p95 = float(model.weight_p95[exercise_idx])
+        return float(np.clip((weight_kg - p5) / (p95 - p5), 0.0, 1.0))
+    return weight_kg / WEIGHT_SCALE
 
 
 def _parse_timestamp(ts) -> datetime:

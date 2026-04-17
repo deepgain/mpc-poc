@@ -30,7 +30,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 32
 HIDDEN_DIM = 128
 LR = 1e-3
-EPOCHS = 20
+EPOCHS = 50
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -49,61 +49,7 @@ ALL_MUSCLES = [
 NUM_MUSCLES = len(ALL_MUSCLES)
 MUSCLE_TO_IDX = {m: i for i, m in enumerate(ALL_MUSCLES)}
 
-# ─── Exercises with muscle involvement coefficients (yaml-loadable) ───────────
-_EXERCISE_MUSCLES_HARDCODED = {
-    # Scale note:
-    # - coefficients are relative involvement strengths in ~[0, 1]
-    # - they are not normalized probabilities and do not need to sum to 1
-    # - they directly modulate MPC drop via involvement * drop
-    # upper_traps and brachialis removed from all entries (no longer in ALL_MUSCLES)
-    "bench_press":           {"chest": 0.85, "triceps": 0.55, "anterior_delts": 0.60},
-    "incline_bench":         {"chest": 0.70, "anterior_delts": 0.75, "triceps": 0.50},
-    "incline_bench_45":      {"chest": 0.72, "triceps": 0.68, "anterior_delts": 0.55},
-    "close_grip_bench":      {"chest": 0.65, "triceps": 0.75, "anterior_delts": 0.55},
-    "spoto_press":           {"chest": 0.75, "triceps": 0.70, "anterior_delts": 0.45},
-    "decline_bench":         {"chest": 0.78, "triceps": 0.72, "anterior_delts": 0.40},
-    "chest_press_machine":   {"chest": 0.72, "anterior_delts": 0.45, "triceps": 0.30},
-    "dumbbell_bench":        {"chest": 0.82, "triceps": 0.45, "anterior_delts": 0.55},
-    "dumbbell_flyes":        {"chest": 0.82, "anterior_delts": 0.30},
-    "ohp":                   {"anterior_delts": 0.85, "triceps": 0.65, "chest": 0.20},
-    "dumbbell_ohp":          {"anterior_delts": 0.80, "triceps": 0.60},
-    "dips":                  {"chest": 0.70, "triceps": 0.65, "anterior_delts": 0.45},
-    "skull_crusher":         {"triceps": 0.85, "anterior_delts": 0.25},
-    "barbell_row":           {"lats": 0.80, "biceps": 0.55, "rear_delts": 0.50, "erectors": 0.40, "rhomboids": 0.45},
-    "pendlay_row":           {"rear_delts": 0.82, "erectors": 0.70, "rhomboids": 0.60, "lats": 0.52},
-    "seal_row":              {"rear_delts": 0.78, "rhomboids": 0.72, "lats": 0.52, "erectors": 0.25},
-    "lat_pulldown":          {"lats": 0.75, "biceps": 0.50, "rear_delts": 0.35, "rhomboids": 0.40},
-    "cable_row":             {"lats": 0.70, "biceps": 0.45, "rear_delts": 0.40, "rhomboids": 0.50},
-    "pull_up":               {"lats": 0.82, "biceps": 0.55, "rear_delts": 0.35, "rhomboids": 0.40},
-    "reverse_fly":           {"rear_delts": 0.88, "lateral_delts": 0.65},
-    "squat":                 {"quads": 0.85, "glutes": 0.60, "hamstrings": 0.35, "erectors": 0.45, "adductors": 0.40},
-    "low_bar_squat":         {"adductors": 0.75, "erectors": 0.70, "glutes": 0.55, "quads": 0.45},
-    "high_bar_squat":        {"quads": 0.82, "glutes": 0.62, "erectors": 0.40},
-    "front_squat":           {"quads": 0.90, "glutes": 0.50, "erectors": 0.55, "adductors": 0.35},
-    "deadlift":              {"glutes": 0.70, "hamstrings": 0.55, "erectors": 0.80, "quads": 0.40, "lats": 0.30, "adductors": 0.35},
-    "sumo_deadlift":         {"quads": 0.70, "glutes": 0.60, "erectors": 0.52, "adductors": 0.45, "hamstrings": 0.40, "abs": 0.65, "calves": 0.30},
-    "rdl":                   {"hamstrings": 0.80, "glutes": 0.55, "erectors": 0.50, "adductors": 0.25},
-    "leg_press":             {"quads": 0.80, "glutes": 0.50, "adductors": 0.35},
-    "bulgarian_split_squat": {"quads": 0.80, "glutes": 0.65, "hamstrings": 0.30, "adductors": 0.40},
-    "hip_thrust":            {"glutes": 0.85, "hamstrings": 0.40, "adductors": 0.30},
-    "tricep_pushdown":       {"triceps": 0.90},
-    "overhead_tricep_ext":   {"triceps": 0.85},
-    "bicep_curl":            {"biceps": 0.90},
-    "hammer_curl":           {"biceps": 0.75},
-    "lateral_raise":         {"lateral_delts": 0.85},
-    "face_pull":             {"rear_delts": 0.70, "rhomboids": 0.35},
-    "leg_curl":              {"hamstrings": 0.85},
-    "leg_extension":         {"quads": 0.85},
-    "calf_raise":            {"calves": 0.90},
-    "plank":                 {"abs": 0.82},
-    "farmers_walk":          {"erectors": 0.70, "abs": 0.52},
-    "leg_raises":            {"abs": 0.82, "lats": 0.32, "quads": 0.28, "erectors": 0.22},
-    "ab_wheel":              {"abs": 0.88},
-    "dead_bug":              {"abs": 0.62},
-    "trx_bodysaw":           {"abs": 0.85, "erectors": 0.15},
-    "suitcase_carry":        {"abs": 0.75, "erectors": 0.65},
-    "bird_dog":              {"glutes": 0.72, "erectors": 0.68},
-}
+# ─── Exercises are loaded from YAML + transformed CSV only ────────────────
 
 _SCALED_WEIGHTS_PATH = "exercise_muscle_weights_scaled.csv"
 
@@ -111,7 +57,7 @@ _SCALED_WEIGHTS_PATH = "exercise_muscle_weights_scaled.csv"
 def _load_scaled_weights(csv_path: str = _SCALED_WEIGHTS_PATH):
     """Load exercise->muscle weights in [0,1] from EMG-derived CSV.
 
-    Priority source: replaces flat 0.7 fallback for exercises in YAML.
+    Priority source for numeric involvement coefficients.
     Expected schema: exercise_id + one column per muscle id in ALL_MUSCLES.
     """
     if not os.path.exists(csv_path):
@@ -134,41 +80,35 @@ def _load_scaled_weights(csv_path: str = _SCALED_WEIGHTS_PATH):
     return weights
 
 def _load_exercise_data(yaml_path: str = "exercise_muscle_order.yaml"):
-    """Load exercise/muscle data from exercise_muscle_order.yaml if present.
+    """Load exercise/muscle data strictly from exercise_muscle_order.yaml.
 
     Returns:
         exercise_muscles : dict[exercise_id -> dict[muscle_id -> float]]
             Numeric involvement coefficients used in the MPC update rule.
-            New exercises (from yaml, not in hardcoded dict) get rank-derived
+            Exercises missing in transformed CSV get rank-derived
             coefficients: coeff(rank r) = max(1.0 - 0.15*r, 0.3).
         exercise_ordinal : dict[exercise_id -> list[muscle_id]]
             Muscles ordered from most to least involved (primary first).
-            Used by the ordinal ordering penalty once yaml is available.
+            Used by the ordinal ordering penalty.
     """
-    fallback_ordinal = {
-        ex: sorted(ms.keys(), key=ms.get, reverse=True)
-        for ex, ms in _EXERCISE_MUSCLES_HARDCODED.items()
-    }
-
     try:
         import yaml
         with open(yaml_path, "r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-    except FileNotFoundError:
-        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Missing required file: {yaml_path}") from exc
     except Exception as exc:
-        print(f"Warning: could not load {yaml_path}: {exc}. Using hardcoded values.")
-        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+        raise RuntimeError(f"Could not load {yaml_path}: {exc}") from exc
 
     if not data or "exercises" not in data:
-        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+        raise RuntimeError(f"Invalid YAML structure in {yaml_path}: missing 'exercises'")
 
     scaled_weights = _load_scaled_weights()
 
     # YAML is the canonical exercise list — only exercises present in YAML are used.
     exercise_muscles = {}
     exercise_ordinal = {}
-    scaled_used = hardcoded_used = fallback_used = 0
+    scaled_used = yaml_rank_used = 0
 
     for ex_id, ex_data in data["exercises"].items():
         if not isinstance(ex_data, dict):
@@ -185,19 +125,19 @@ def _load_exercise_data(yaml_path: str = "exercise_muscle_order.yaml"):
             continue
         exercise_ordinal[ex_id] = valid_ranked
 
-        # Priority: EMG CSV → hardcoded literature → flat 0.7 fallback
+        # Priority: EMG CSV → YAML rank-derived coefficients
         if ex_id in scaled_weights:
             exercise_muscles[ex_id] = scaled_weights[ex_id]
             scaled_used += 1
-        elif ex_id in _EXERCISE_MUSCLES_HARDCODED:
-            exercise_muscles[ex_id] = _EXERCISE_MUSCLES_HARDCODED[ex_id]
-            hardcoded_used += 1
         else:
-            exercise_muscles[ex_id] = {m: 0.7 for m in valid_ranked}
-            fallback_used += 1
+            exercise_muscles[ex_id] = {
+                m: max(1.0 - 0.15 * r, 0.3)
+                for r, m in enumerate(valid_ranked)
+            }
+            yaml_rank_used += 1
 
     print(f"Exercise data: {yaml_path} — {len(exercise_muscles)} exercises "
-          f"(csv={scaled_used}, hardcoded={hardcoded_used}, fallback={fallback_used})")
+          f"(csv={scaled_used}, yaml_rank={yaml_rank_used})")
     return exercise_muscles, exercise_ordinal
 
 
@@ -232,33 +172,68 @@ def _load_split(path):
     df["delta_t_hours"] = df["delta_t_hours"].fillna(0.0)
     return df
 
+print("Loading data...")
+# Per-user 70/30 split — preserves complete user sequences in val (no MPC state leakage).
+# Falls back to pre-split files if full CSV not available.
+_FULL_CSV = "training_data_michal_full.csv"
 _SPLIT_CANDIDATES = [
     ("training_data_train.csv", "training_data_val.csv"),
     ("generated_datasets/baseline_main/training_data_train.csv",
      "generated_datasets/baseline_main/training_data_val.csv"),
 ]
 
-print("Loading data...")
-_loaded = False
-for _train_path, _val_path in _SPLIT_CANDIDATES:
-    if os.path.exists(_train_path) and os.path.exists(_val_path):
-        train_df = _load_split(_train_path)
-        test_df  = _load_split(_val_path)
-        print(f"Loaded pre-split files: {_train_path}")
-        _loaded = True
-        break
-if not _loaded:
-    df = _load_split("training_data.csv")
+if os.path.exists(_FULL_CSV):
+    df = _load_split(_FULL_CSV)
     user_ids = df["user_id"].unique()
     rng = np.random.RandomState(42)
     rng.shuffle(user_ids)
     split = int(0.7 * len(user_ids))
     train_df = df[df["user_id"].isin(set(user_ids[:split]))].copy()
     test_df  = df[df["user_id"].isin(set(user_ids[split:]))].copy()
-    print(f"Loaded training_data.csv, split 70/30")
+    print(f"Loaded {_FULL_CSV}, per-user 70/30 split ({len(set(user_ids[:split]))} train / {len(set(user_ids[split:]))} val users)")
+else:
+    _loaded = False
+    for _train_path, _val_path in _SPLIT_CANDIDATES:
+        if os.path.exists(_train_path) and os.path.exists(_val_path):
+            train_df = _load_split(_train_path)
+            test_df  = _load_split(_val_path)
+            print(f"Loaded pre-split files: {_train_path}")
+            _loaded = True
+            break
+    if not _loaded:
+        df = _load_split("training_data.csv")
+        user_ids = df["user_id"].unique()
+        rng = np.random.RandomState(42)
+        rng.shuffle(user_ids)
+        split = int(0.7 * len(user_ids))
+        train_df = df[df["user_id"].isin(set(user_ids[:split]))].copy()
+        test_df  = df[df["user_id"].isin(set(user_ids[split:]))].copy()
+        print(f"Loaded training_data.csv, per-user 70/30 split")
 
 print(f"Train: {len(train_df):,} sets from {train_df['user_id'].nunique()} users")
 print(f"Test:  {len(test_df):,} sets from {test_df['user_id'].nunique()} users")
+
+# ── Per-exercise weight normalization (p5/p95 from train only) ────────────────
+# Replaces global WEIGHT_SCALE=200. Makes weight=0.5 mean "median for this exercise"
+# so bench 80kg and dips 80kg are no longer the same number.
+_stats = train_df.groupby("exercise")["weight_kg"].quantile([0.05, 0.95]).unstack()
+WEIGHT_P5  = np.full(NUM_EXERCISES, 0.0,   dtype=np.float32)
+WEIGHT_P95 = np.full(NUM_EXERCISES, 200.0, dtype=np.float32)
+for _ex, _row in _stats.iterrows():
+    if _ex in EXERCISE_TO_IDX:
+        _ei = EXERCISE_TO_IDX[_ex]
+        _p5, _p95 = float(_row[0.05]), float(_row[0.95])
+        if _p95 > _p5 + 1.0:  # skip degenerate ranges
+            WEIGHT_P5[_ei]  = _p5
+            WEIGHT_P95[_ei] = _p95
+
+def normalize_weight(weight_kg_arr, exercise_idx_arr):
+    """Normalize weight per-exercise to [0, 1] using p5/p95 from training data."""
+    p5  = WEIGHT_P5[exercise_idx_arr]
+    p95 = WEIGHT_P95[exercise_idx_arr]
+    return np.clip((weight_kg_arr - p5) / (p95 - p5), 0.0, 1.0).astype(np.float32)
+
+print("Weight ranges computed (per-exercise p5/p95)")
 
 # ═══════════════════════════════════════════════════════════════════
 # DATASET & DATALOADER
@@ -270,7 +245,7 @@ def build_user_sequences(user_df):
         seq = {
             "user_id": uid,
             "exercise_idx": torch.tensor(grp["exercise_idx"].values, dtype=torch.long),
-            "weight": torch.tensor(grp["weight_kg"].values / WEIGHT_SCALE, dtype=torch.float32),
+            "weight": torch.tensor(normalize_weight(grp["weight_kg"].values, grp["exercise_idx"].values), dtype=torch.float32),
             "reps": torch.tensor(grp["reps"].values / REPS_SCALE, dtype=torch.float32),
             "rir": torch.tensor(grp["rir"].values / RIR_SCALE, dtype=torch.float32),
             "delta_t": torch.tensor(
@@ -532,7 +507,7 @@ class DeepGainModel(nn.Module):
         penalty = torch.tensor(0.0, device=device)
         n_muscles = 0
 
-        w   = torch.tensor([0.4],  dtype=torch.float32, device=device)
+        w   = torch.tensor([0.5],  dtype=torch.float32, device=device)
         r   = torch.tensor([0.27], dtype=torch.float32, device=device)
         rir = torch.tensor([0.4],  dtype=torch.float32, device=device)
         mpc = torch.tensor([1.0],  dtype=torch.float32, device=device)
@@ -745,10 +720,18 @@ for epoch in range(EPOCHS):
 
     if val_loss < best_val_loss:
         best_val_loss = val_loss
-        torch.save(model.state_dict(), "deepgain_model_best.pt")
+        torch.save({
+            "model_state_dict": model.state_dict(),
+            "weight_p5":  WEIGHT_P5,
+            "weight_p95": WEIGHT_P95,
+        }, "deepgain_model_best.pt")
 
 # Save final model
-torch.save(model.state_dict(), "deepgain_model_muscle_ord.pt")
+torch.save({
+    "model_state_dict": model.state_dict(),
+    "weight_p5":  WEIGHT_P5,
+    "weight_p95": WEIGHT_P95,
+}, "deepgain_model_muscle_ord.pt")
 print(f"\nModel saved to deepgain_model_muscle_ord.pt")
 print(f"Best val model saved to deepgain_model_best.pt (RMSE {np.sqrt(best_val_loss) * RIR_SCALE:.4f})")
 
@@ -799,7 +782,7 @@ print(f"\nOrdering accuracy per exercise (% pairs where primary muscle drops mor
 model.eval()
 ordering_results = {}
 with torch.no_grad():
-    w   = torch.tensor([0.4],  dtype=torch.float32, device=DEVICE)
+    w   = torch.tensor([0.5],  dtype=torch.float32, device=DEVICE)
     r   = torch.tensor([0.27], dtype=torch.float32, device=DEVICE)
     rir = torch.tensor([0.4],  dtype=torch.float32, device=DEVICE)
     mpc = torch.tensor([1.0],  dtype=torch.float32, device=DEVICE)
@@ -996,45 +979,80 @@ plt.savefig(f"{CHART_DIR}/chart_recovery_curves.png", dpi=150)
 print("Saved chart_recovery_curves.png")
 
 # --- Chart 5: Fatigue Heatmaps ---
-probe_exercises = ["bench_press", "squat", "deadlift"]
-weight_range = np.linspace(0.1, 1.0, 30)
-reps_range = np.linspace(0.03, 0.5, 30)
+_heatmap_exercises = ["bench_press", "squat", "deadlift", "ohp", "pendlay_row", "dips"]
+_heatmap_exercises = [e for e in _heatmap_exercises if e in EXERCISE_TO_IDX]
+_ncols = 3
+_nrows = math.ceil(len(_heatmap_exercises) / _ncols)
 
-fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+# Per-exercise reps p5/p95 from training data
+_reps_stats = train_df.groupby("exercise")["reps"].quantile([0.05, 0.95]).unstack()
+_REPS_P5  = {ex: max(1.0,  float(_reps_stats.loc[ex, 0.05])) for ex in _heatmap_exercises if ex in _reps_stats.index}
+_REPS_P95 = {ex: min(30.0, float(_reps_stats.loc[ex, 0.95])) for ex in _heatmap_exercises if ex in _reps_stats.index}
+
+_HM_N = 30
+fig, axes = plt.subplots(_nrows, _ncols, figsize=(18, 5 * _nrows))
+_axes_flat = np.array(axes).reshape(-1)
 
 with torch.no_grad():
-    for col, ex_name in enumerate(probe_exercises):
+    for idx, ex_name in enumerate(_heatmap_exercises):
+        ax = _axes_flat[idx]
         ei = EXERCISE_TO_IDX[ex_name]
         muscles = EXERCISE_MUSCLES[ex_name]
         primary_muscle = max(muscles, key=muscles.get)
         mi = MUSCLE_TO_IDX[primary_muscle]
 
+        w_p5_kg  = float(WEIGHT_P5[ei])
+        w_p95_kg = float(WEIGHT_P95[ei])
+        r_p5     = _REPS_P5.get(ex_name, 1.0)
+        r_p95    = _REPS_P95.get(ex_name, 15.0)
+
+        weight_kg_arr = np.linspace(w_p5_kg, w_p95_kg, _HM_N)
+        reps_arr      = np.linspace(r_p5, r_p95, _HM_N)
+
         e_embed = model.exercise_embed(torch.tensor([ei], device=DEVICE))
         m_embed = model.muscle_embed(torch.tensor([mi], device=DEVICE))
 
-        drop_grid = np.zeros((len(reps_range), len(weight_range)))
-
-        for ri, r_val in enumerate(reps_range):
-            for wi, w_val in enumerate(weight_range):
-                w_t = torch.tensor([w_val], dtype=torch.float32, device=DEVICE)
-                r_t = torch.tensor([r_val], dtype=torch.float32, device=DEVICE)
-                rir_t = torch.tensor([0.4], dtype=torch.float32, device=DEVICE)  # RIR 2
-                mpc_t = torch.tensor([1.0], dtype=torch.float32, device=DEVICE)
-
+        drop_grid = np.zeros((_HM_N, _HM_N))
+        w_range = max(w_p95_kg - w_p5_kg, 1.0)
+        for ri, r_val in enumerate(reps_arr):
+            r_norm = r_val / REPS_SCALE
+            for wi, w_kg in enumerate(weight_kg_arr):
+                w_norm = float(np.clip((w_kg - w_p5_kg) / w_range, 0.0, 1.0))
+                w_t   = torch.tensor([w_norm], dtype=torch.float32, device=DEVICE)
+                r_t   = torch.tensor([r_norm], dtype=torch.float32, device=DEVICE)
+                rir_t = torch.tensor([0.4],    dtype=torch.float32, device=DEVICE)
+                mpc_t = torch.tensor([1.0],    dtype=torch.float32, device=DEVICE)
                 d = model.f_net(w_t, r_t, rir_t, mpc_t, e_embed, m_embed).item()
                 drop_grid[ri, wi] = d * muscles[primary_muscle]
 
-        ax = axes[col]
         im = ax.imshow(drop_grid, aspect="auto", origin="lower",
-                       extent=[20, 200, 1, 15], cmap="YlOrRd", vmin=0)
+                       extent=[w_p5_kg, w_p95_kg, r_p5, r_p95],
+                       cmap="YlOrRd", vmin=0)
         ax.set_xlabel("Weight (kg)")
         ax.set_ylabel("Reps")
-        ax.set_title(f"MPC Drop: {ex_name.replace('_', ' ')}\n(primary: {primary_muscle})")
+        ax.set_title(f"{ex_name.replace('_', ' ').title()}\n(primary: {primary_muscle})")
         plt.colorbar(im, ax=ax, label="MPC drop")
 
-plt.suptitle("Fatigue Response (f) at RIR 2, MPC=1.0", fontsize=14, y=1.02)
+        # Grey mask where no training data exists (off-manifold)
+        ex_train = train_df[train_df["exercise"] == ex_name]
+        if len(ex_train) > 0:
+            hist, _, _ = np.histogram2d(
+                ex_train["weight_kg"].values, ex_train["reps"].values,
+                bins=[_HM_N, _HM_N],
+                range=[[w_p5_kg, w_p95_kg], [r_p5, r_p95]],
+            )
+            no_data = (hist.T == 0).astype(float)
+            ax.imshow(no_data, aspect="auto", origin="lower",
+                      extent=[w_p5_kg, w_p95_kg, r_p5, r_p95],
+                      cmap="Greys", alpha=0.45, vmin=0, vmax=1)
+
+for idx in range(len(_heatmap_exercises), len(_axes_flat)):
+    _axes_flat[idx].set_visible(False)
+
+plt.suptitle("Learned Fatigue (f) — Per-Muscle Breakdown\n(per-exercise weight/reps range; grey = no training data)",
+             fontsize=13)
 plt.tight_layout()
-plt.savefig(f"{CHART_DIR}/chart_fatigue_heatmaps.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_fatigue_heatmaps.png", dpi=150, bbox_inches="tight")
 print("Saved chart_fatigue_heatmaps.png")
 
 # ── Chart 6: Cross-exercise fatigue transfer matrix ──────────────────────────
