@@ -7,3 +7,4 @@ train_output.log
 chart_*.png
 .claude/
 *.pt
+!deepgain_model_muscle_ord.pt

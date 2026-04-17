@@ -13,13 +13,14 @@ Usage:
          "timestamp": "2024-01-01T10:20:00"},
     ]
     mpc = predict_mpc(model, history, timestamp="2024-01-02T09:00:00")
-    # {"chest": 0.83, "triceps": 0.91, "anterior_delts": 0.88, ...}
+    # {"chest": 0.83, "triceps": 0.91, "anterior_delts": 0.88, ...}  (15 muscles)
 
     rir = predict_rir(model, mpc, exercise="bench_press", weight=80.0, reps=5)
     # 1.8
 """
 
 import math
+import os
 from datetime import datetime
 
 import numpy as np
@@ -29,7 +30,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# ─── Device ─────────────────────────────────────────────────────────────────
+# ─── Device ──────────────────────────────────────────────────────────────────
 if torch.cuda.is_available():
     _DEFAULT_DEVICE = torch.device("cuda")
 elif torch.backends.mps.is_available():
@@ -37,65 +38,128 @@ elif torch.backends.mps.is_available():
 else:
     _DEFAULT_DEVICE = torch.device("cpu")
 
-# ─── Constants (must stay in sync with train.py) ────────────────────────────
-EMBED_DIM = 32
-HIDDEN_DIM = 128
+# ─── Constants (must stay in sync with train.py) ─────────────────────────────
+EMBED_DIM    = 32
+HIDDEN_DIM   = 128
 WEIGHT_SCALE = 200.0
-REPS_SCALE = 30.0
-RIR_SCALE = 5.0
-DT_SCALE = np.log1p(168.0)
+REPS_SCALE   = 30.0
+RIR_SCALE    = 5.0
+DT_SCALE     = math.log1p(168.0)
 
+# ─── Muscles (15 groups, upper_traps and brachialis removed) ─────────────────
 ALL_MUSCLES = [
     "chest", "anterior_delts", "lateral_delts", "rear_delts",
-    "upper_traps", "rhomboids", "triceps", "biceps", "brachialis",
+    "rhomboids", "triceps", "biceps",
     "lats", "quads", "hamstrings", "glutes", "adductors", "erectors", "calves",
+    "abs",
 ]
-NUM_MUSCLES = len(ALL_MUSCLES)
+NUM_MUSCLES   = len(ALL_MUSCLES)
 MUSCLE_TO_IDX = {m: i for i, m in enumerate(ALL_MUSCLES)}
 
-# Hardcoded involvement — will be replaced by exercise_muscle_order.yaml once delivered
-EXERCISE_MUSCLES = {
+# ─── Exercise loading (yaml + EMG CSV → hardcoded fallback) ──────────────────
+_EXERCISE_MUSCLES_HARDCODED = {
     "bench_press":           {"chest": 0.85, "triceps": 0.55, "anterior_delts": 0.60},
     "incline_bench":         {"chest": 0.70, "anterior_delts": 0.75, "triceps": 0.50},
+    "incline_bench_45":      {"chest": 0.72, "triceps": 0.68, "anterior_delts": 0.55},
     "close_grip_bench":      {"chest": 0.65, "triceps": 0.75, "anterior_delts": 0.55},
-    "dumbbell_bench":        {"chest": 0.82, "triceps": 0.45, "anterior_delts": 0.55},
-    "ohp":                   {"anterior_delts": 0.85, "triceps": 0.65, "chest": 0.20, "upper_traps": 0.40},
-    "dumbbell_ohp":          {"anterior_delts": 0.80, "triceps": 0.60, "upper_traps": 0.35},
+    "spoto_press":           {"chest": 0.75, "triceps": 0.70, "anterior_delts": 0.45},
+    "decline_bench":         {"chest": 0.78, "triceps": 0.72, "anterior_delts": 0.40},
+    "chest_press_machine":   {"chest": 0.72, "anterior_delts": 0.45, "triceps": 0.30},
+    "dumbbell_flyes":        {"chest": 0.82, "anterior_delts": 0.30},
+    "ohp":                   {"anterior_delts": 0.85, "triceps": 0.65, "chest": 0.20},
     "dips":                  {"chest": 0.70, "triceps": 0.65, "anterior_delts": 0.45},
-    "barbell_row":           {"lats": 0.80, "biceps": 0.55, "rear_delts": 0.50, "erectors": 0.40, "upper_traps": 0.35, "rhomboids": 0.45},
+    "skull_crusher":         {"triceps": 0.85, "anterior_delts": 0.25},
+    "pendlay_row":           {"rear_delts": 0.82, "erectors": 0.70, "rhomboids": 0.60, "lats": 0.52},
+    "seal_row":              {"rear_delts": 0.78, "rhomboids": 0.72, "lats": 0.52, "erectors": 0.25},
     "lat_pulldown":          {"lats": 0.75, "biceps": 0.50, "rear_delts": 0.35, "rhomboids": 0.40},
-    "cable_row":             {"lats": 0.70, "biceps": 0.45, "rear_delts": 0.40, "rhomboids": 0.50, "upper_traps": 0.30},
     "pull_up":               {"lats": 0.82, "biceps": 0.55, "rear_delts": 0.35, "rhomboids": 0.40},
+    "reverse_fly":           {"rear_delts": 0.88, "lateral_delts": 0.65},
     "squat":                 {"quads": 0.85, "glutes": 0.60, "hamstrings": 0.35, "erectors": 0.45, "adductors": 0.40},
-    "front_squat":           {"quads": 0.90, "glutes": 0.50, "erectors": 0.55, "adductors": 0.35},
-    "deadlift":              {"glutes": 0.70, "hamstrings": 0.55, "erectors": 0.80, "quads": 0.40, "upper_traps": 0.50, "lats": 0.30, "adductors": 0.35},
+    "low_bar_squat":         {"adductors": 0.75, "erectors": 0.70, "glutes": 0.55, "quads": 0.45},
+    "high_bar_squat":        {"quads": 0.82, "glutes": 0.62, "erectors": 0.40},
+    "deadlift":              {"glutes": 0.70, "hamstrings": 0.55, "erectors": 0.80, "quads": 0.40, "lats": 0.30, "adductors": 0.35},
+    "sumo_deadlift":         {"quads": 0.70, "glutes": 0.60, "erectors": 0.52, "adductors": 0.45, "hamstrings": 0.40, "abs": 0.65, "calves": 0.30},
     "rdl":                   {"hamstrings": 0.80, "glutes": 0.55, "erectors": 0.50, "adductors": 0.25},
     "leg_press":             {"quads": 0.80, "glutes": 0.50, "adductors": 0.35},
     "bulgarian_split_squat": {"quads": 0.80, "glutes": 0.65, "hamstrings": 0.30, "adductors": 0.40},
-    "hip_thrust":            {"glutes": 0.85, "hamstrings": 0.40, "adductors": 0.30},
-    "tricep_pushdown":       {"triceps": 0.90},
-    "overhead_tricep_ext":   {"triceps": 0.85},
-    "bicep_curl":            {"biceps": 0.90},
-    "hammer_curl":           {"biceps": 0.75, "brachialis": 0.60},
-    "lateral_raise":         {"lateral_delts": 0.85, "upper_traps": 0.30},
-    "face_pull":             {"rear_delts": 0.70, "upper_traps": 0.40, "rhomboids": 0.35},
     "leg_curl":              {"hamstrings": 0.85},
     "leg_extension":         {"quads": 0.85},
-    "calf_raise":            {"calves": 0.90},
+    "farmers_walk":          {"erectors": 0.70, "abs": 0.52},
+    "leg_raises":            {"abs": 0.82, "lats": 0.32, "quads": 0.28, "erectors": 0.22},
+    "ab_wheel":              {"abs": 0.88},
+    "dead_bug":              {"abs": 0.62},
+    "trx_bodysaw":           {"abs": 0.85, "erectors": 0.15},
+    "suitcase_carry":        {"abs": 0.75, "erectors": 0.65},
+    "bird_dog":              {"glutes": 0.72, "erectors": 0.68},
+    "plank":                 {"abs": 0.82},
 }
 
-ALL_EXERCISES = list(EXERCISE_MUSCLES.keys())
-NUM_EXERCISES = len(ALL_EXERCISES)
-EXERCISE_TO_IDX = {e: i for i, e in enumerate(ALL_EXERCISES)}
+
+def _load_exercise_muscles(
+    yaml_path: str = "exercise_muscle_order.yaml",
+    csv_path: str  = "exercise_muscle_weights_scaled.csv",
+) -> dict[str, dict[str, float]]:
+    """Load exercise→muscle involvement weights.
+
+    Priority: EMG CSV → hardcoded literature → rank-derived fallback.
+    Falls back silently to hardcoded dict if yaml is not found.
+    """
+    # Load EMG CSV weights
+    csv_weights: dict[str, dict[str, float]] = {}
+    if os.path.exists(csv_path):
+        try:
+            import pandas as pd
+            df = pd.read_csv(csv_path)
+            if all(m in df.columns for m in ALL_MUSCLES):
+                for _, row in df.iterrows():
+                    ex_id = str(row["exercise_id"])
+                    w = {m: float(np.clip(row[m], 0.0, 1.0))
+                         for m in ALL_MUSCLES if float(row[m]) > 0.0}
+                    if w:
+                        csv_weights[ex_id] = w
+        except Exception:
+            pass
+
+    # Load yaml for exercise list + ordinal
+    try:
+        import yaml
+        with open(yaml_path, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        if not data or "exercises" not in data:
+            raise ValueError("empty yaml")
+    except Exception:
+        return dict(_EXERCISE_MUSCLES_HARDCODED)
+
+    result: dict[str, dict[str, float]] = {}
+    for ex_id, ex_data in data["exercises"].items():
+        primary   = ex_data.get("primary_muscles", []) or []
+        secondary = ex_data.get("secondary_muscles", []) or []
+        ordered   = [m for m in (primary + secondary) if m in MUSCLE_TO_IDX]
+        if not ordered:
+            continue
+        if ex_id in csv_weights:
+            result[ex_id] = csv_weights[ex_id]
+        elif ex_id in _EXERCISE_MUSCLES_HARDCODED:
+            result[ex_id] = _EXERCISE_MUSCLES_HARDCODED[ex_id]
+        else:
+            result[ex_id] = {m: max(1.0 - 0.15 * r, 0.3) for r, m in enumerate(ordered)}
+    return result
+
+
+EXERCISE_MUSCLES = _load_exercise_muscles()
+ALL_EXERCISES    = list(EXERCISE_MUSCLES.keys())
+NUM_EXERCISES    = len(ALL_EXERCISES)
+EXERCISE_TO_IDX  = {e: i for i, e in enumerate(ALL_EXERCISES)}
 
 INVOLVEMENT_MATRIX = np.zeros((NUM_EXERCISES, NUM_MUSCLES), dtype=np.float32)
 for _ex, _ms in EXERCISE_MUSCLES.items():
     _ei = EXERCISE_TO_IDX[_ex]
     for _m, _c in _ms.items():
-        INVOLVEMENT_MATRIX[_ei, MUSCLE_TO_IDX[_m]] = _c
+        if _m in MUSCLE_TO_IDX:
+            INVOLVEMENT_MATRIX[_ei, MUSCLE_TO_IDX[_m]] = _c
 
 
-# ─── Model Architecture (mirrors train.py) ──────────────────────────────────
+# ─── Model Architecture (mirrors train.py exactly) ───────────────────────────
 
 class FatigueNet(nn.Module):
     def __init__(self, embed_dim, hidden_dim):
@@ -136,17 +200,15 @@ class RIRNet(nn.Module):
 
 
 class ExponentialRecovery(nn.Module):
-    # Literature-derived τ values (hours) — matches train.py exactly
+    # Literature-derived τ (hours) — fixed, matches train.py exactly
     FIXED_TAU = [
         16.0,  # chest
         13.0,  # anterior_delts
          9.0,  # lateral_delts
          8.0,  # rear_delts
-         9.0,  # upper_traps
         10.0,  # rhomboids
          9.0,  # triceps
         13.0,  # biceps
-        13.0,  # brachialis
         13.0,  # lats
         19.0,  # quads
         18.0,  # hamstrings
@@ -154,6 +216,7 @@ class ExponentialRecovery(nn.Module):
         12.0,  # adductors
         12.0,  # erectors
          8.0,  # calves
+        10.0,  # abs
     ]
 
     def __init__(self, num_muscles):
@@ -162,7 +225,6 @@ class ExponentialRecovery(nn.Module):
         self.log_tau = nn.Parameter(init_tau, requires_grad=False)
 
     def forward(self, mpc, delta_t, muscle_idx):
-        """mpc: (N,), delta_t: (N,) normalized, muscle_idx: (N,) long."""
         dt_hours = torch.expm1(delta_t * DT_SCALE)
         tau = torch.exp(self.log_tau[muscle_idx])
         return 1.0 - (1.0 - mpc) * torch.exp(-dt_hours / tau)
@@ -171,19 +233,19 @@ class ExponentialRecovery(nn.Module):
 class DeepGainModel(nn.Module):
     def __init__(self, num_exercises, num_muscles, embed_dim, hidden_dim):
         super().__init__()
-        self.num_muscles = num_muscles
+        self.num_muscles    = num_muscles
         self.exercise_embed = nn.Embedding(num_exercises, embed_dim)
-        self.muscle_embed = nn.Embedding(num_muscles, embed_dim)
+        self.muscle_embed   = nn.Embedding(num_muscles,   embed_dim)
         self.f_net = FatigueNet(embed_dim, hidden_dim)
         self.g_net = RIRNet(embed_dim, hidden_dim, num_muscles)
-        self.r = ExponentialRecovery(num_muscles)
+        self.r     = ExponentialRecovery(num_muscles)
         self.register_buffer(
             "involvement",
             torch.tensor(INVOLVEMENT_MATRIX, dtype=torch.float32),
         )
 
 
-# ─── Public API ─────────────────────────────────────────────────────────────
+# ─── Public API ──────────────────────────────────────────────────────────────
 
 def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
     """Load a trained DeepGain model from a checkpoint file.
@@ -198,8 +260,8 @@ def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
     if device is None:
         device = _DEFAULT_DEVICE
     model = DeepGainModel(NUM_EXERCISES, NUM_MUSCLES, EMBED_DIM, HIDDEN_DIM)
-    state_dict = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    model.load_state_dict(state_dict)
+    ckpt  = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model.load_state_dict(ckpt.get("model_state_dict", ckpt))
     model = model.to(device)
     model.eval()
     return model
@@ -208,7 +270,7 @@ def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
 def predict_mpc(
     model: DeepGainModel,
     user_history: list[dict],
-    timestamp: str | datetime,
+    timestamp: "str | datetime",
 ) -> dict[str, float]:
     """Estimate Muscle Performance Capacity for all muscles at a given moment.
 
@@ -222,7 +284,7 @@ def predict_mpc(
             - "exercise"   : str   — exercise_id (e.g. "bench_press")
             - "weight_kg"  : float — weight used
             - "reps"       : int   — reps performed
-            - "rir"        : int   — reps in reserve actually logged (0-5)
+            - "rir"        : int   — reps in reserve actually logged (0–5)
             - "timestamp"  : str or datetime — when the set was performed
           Sets with unknown exercises are silently skipped.
           Sets after `timestamp` are excluded.
@@ -237,10 +299,9 @@ def predict_mpc(
         mpc = predict_mpc(model, history, "2024-01-02T09:00:00")
         # {"chest": 0.72, "triceps": 0.88, "quads": 1.0, ...}
     """
-    device = next(model.parameters()).device
-    ts_query = _parse_timestamp(timestamp)
+    device    = next(model.parameters()).device
+    ts_query  = _parse_timestamp(timestamp)
 
-    # Filter to known exercises at or before the query timestamp, sort by time
     valid = []
     for entry in user_history:
         ts = _parse_timestamp(entry["timestamp"])
@@ -251,9 +312,9 @@ def predict_mpc(
             continue
         valid.append({
             "exercise_idx": EXERCISE_TO_IDX[ex],
-            "weight":  float(entry["weight_kg"]) / WEIGHT_SCALE,
-            "reps":    float(entry["reps"]) / REPS_SCALE,
-            "rir":     float(entry["rir"]) / RIR_SCALE,
+            "weight":    float(entry["weight_kg"]) / WEIGHT_SCALE,
+            "reps":      float(entry["reps"])      / REPS_SCALE,
+            "rir":       float(entry["rir"])        / RIR_SCALE,
             "timestamp": ts,
         })
 
@@ -262,55 +323,48 @@ def predict_mpc(
 
     valid.sort(key=lambda x: x["timestamp"])
 
-    M = model.num_muscles
-    all_m_idx = torch.arange(M, device=device)
-    all_m_embed = model.muscle_embed(all_m_idx)          # (M, E)
-    E = all_m_embed.shape[-1]
-    all_m_embed_exp = all_m_embed.unsqueeze(0)            # (1, M, E)
-    m_idx_flat = all_m_idx                                # (M,)
+    M           = model.num_muscles
+    all_m_idx   = torch.arange(M, device=device)
+    all_m_embed = model.muscle_embed(all_m_idx)           # (M, E)
+    E           = all_m_embed.shape[-1]
 
     with torch.no_grad():
-        mpc = torch.ones(1, M, device=device)             # (1, M)
-        prev_ts = valid[0]["timestamp"]
+        mpc      = torch.ones(1, M, device=device)
+        prev_ts  = valid[0]["timestamp"]
 
         for i, s in enumerate(valid):
-            # Recovery since previous set (skip for first set)
             if i > 0:
                 dt_h = (s["timestamp"] - prev_ts).total_seconds() / 3600.0
                 if dt_h > 0:
                     dt_norm = torch.tensor(
                         [np.log1p(dt_h) / DT_SCALE], dtype=torch.float32, device=device
                     ).expand(M)
-                    mpc = model.r(mpc.reshape(-1), dt_norm, m_idx_flat).reshape(1, M)
+                    mpc = model.r(mpc.reshape(-1), dt_norm, all_m_idx).reshape(1, M)
 
-            # Fatigue from this set
-            ei = torch.tensor([s["exercise_idx"]], dtype=torch.long, device=device)
-            e_embed = model.exercise_embed(ei)                            # (1, E)
-            inv = model.involvement[ei]                                   # (1, M)
+            ei    = torch.tensor([s["exercise_idx"]], dtype=torch.long, device=device)
+            e_emb = model.exercise_embed(ei)                              # (1, E)
+            inv   = model.involvement[ei]                                 # (1, M)
 
-            e_emb_exp = e_embed.unsqueeze(1).expand(-1, M, -1).reshape(-1, E)  # (M, E)
-            w_exp   = torch.full((M,), s["weight"], dtype=torch.float32, device=device)
-            r_exp   = torch.full((M,), s["reps"],   dtype=torch.float32, device=device)
-            rir_exp = torch.full((M,), s["rir"],    dtype=torch.float32, device=device)
-            mpc_flat   = mpc.reshape(-1)                                  # (M,)
-            m_emb_flat = all_m_embed_exp.reshape(-1, E)                   # (M, E)
+            e_emb_exp = e_emb.unsqueeze(1).expand(-1, M, -1).reshape(-1, E)
+            w_exp     = torch.full((M,), s["weight"], dtype=torch.float32, device=device)
+            r_exp     = torch.full((M,), s["reps"],   dtype=torch.float32, device=device)
+            rir_exp   = torch.full((M,), s["rir"],    dtype=torch.float32, device=device)
+            m_emb_exp = all_m_embed                                        # (M, E)
 
-            drop = model.f_net(w_exp, r_exp, rir_exp, mpc_flat, e_emb_exp, m_emb_flat)
-            mpc = (mpc * (1.0 - inv * drop.reshape(1, M))).clamp(min=0.1)
-
+            drop = model.f_net(w_exp, r_exp, rir_exp, mpc.reshape(-1), e_emb_exp, m_emb_exp)
+            mpc  = (mpc * (1.0 - inv * drop.reshape(1, M))).clamp(min=0.1)
             prev_ts = s["timestamp"]
 
-        # Recovery from last set to query timestamp
         dt_final = (ts_query - prev_ts).total_seconds() / 3600.0
         if dt_final > 0:
             dt_norm = torch.tensor(
                 [np.log1p(dt_final) / DT_SCALE], dtype=torch.float32, device=device
             ).expand(M)
-            mpc = model.r(mpc.reshape(-1), dt_norm, m_idx_flat).reshape(1, M)
+            mpc = model.r(mpc.reshape(-1), dt_norm, all_m_idx).reshape(1, M)
 
         mpc_np = mpc[0].cpu().numpy()
 
-    return {muscle: float(mpc_np[i]) for i, muscle in enumerate(ALL_MUSCLES)}
+    return {m: float(mpc_np[i]) for i, m in enumerate(ALL_MUSCLES)}
 
 
 def predict_rir(
@@ -344,18 +398,17 @@ def predict_rir(
     """
     if exercise not in EXERCISE_TO_IDX:
         raise ValueError(
-            f"Unknown exercise '{exercise}'. "
-            f"Known: {ALL_EXERCISES}"
+            f"Unknown exercise '{exercise}'. Known: {ALL_EXERCISES}"
         )
 
-    device = next(model.parameters()).device
-
-    mpc_vals = [state.get(m, 1.0) for m in ALL_MUSCLES]
-    mpc_t = torch.tensor([mpc_vals], dtype=torch.float32, device=device)   # (1, M)
-    w_t   = torch.tensor([weight / WEIGHT_SCALE], dtype=torch.float32, device=device)
-    r_t   = torch.tensor([reps / REPS_SCALE],     dtype=torch.float32, device=device)
-    ei    = torch.tensor([EXERCISE_TO_IDX[exercise]], dtype=torch.long, device=device)
-    e_emb = model.exercise_embed(ei)                                         # (1, E)
+    device  = next(model.parameters()).device
+    mpc_t   = torch.tensor(
+        [[state.get(m, 1.0) for m in ALL_MUSCLES]], dtype=torch.float32, device=device
+    )
+    w_t     = torch.tensor([weight / WEIGHT_SCALE], dtype=torch.float32, device=device)
+    r_t     = torch.tensor([reps   / REPS_SCALE],   dtype=torch.float32, device=device)
+    ei      = torch.tensor([EXERCISE_TO_IDX[exercise]], dtype=torch.long, device=device)
+    e_emb   = model.exercise_embed(ei)
 
     with torch.no_grad():
         rir_norm = model.g_net(w_t, r_t, e_emb, mpc_t)
@@ -363,15 +416,15 @@ def predict_rir(
     return float(np.clip(float(rir_norm.item()) * RIR_SCALE, 0.0, 5.0))
 
 
-# ─── Helpers ────────────────────────────────────────────────────────────────
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def get_muscles() -> list[str]:
-    """Return the canonical list of muscle IDs."""
+    """Return the canonical list of muscle IDs (15 muscles)."""
     return list(ALL_MUSCLES)
 
 
 def get_exercises() -> list[str]:
-    """Return all exercise IDs recognized by the current model."""
+    """Return all exercise IDs recognized by the current model (34 exercises)."""
     return list(ALL_EXERCISES)
 
 
@@ -382,5 +435,4 @@ def _parse_timestamp(ts) -> datetime:
     if isinstance(ts, np.datetime64):
         import pandas as pd
         return pd.Timestamp(ts).to_pydatetime().replace(tzinfo=None)
-    s = str(ts)
-    return datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
+    return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).replace(tzinfo=None)
