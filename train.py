@@ -49,61 +49,7 @@ ALL_MUSCLES = [
 NUM_MUSCLES = len(ALL_MUSCLES)
 MUSCLE_TO_IDX = {m: i for i, m in enumerate(ALL_MUSCLES)}
 
-# ─── Exercises with muscle involvement coefficients (yaml-loadable) ───────────
-_EXERCISE_MUSCLES_HARDCODED = {
-    # Scale note:
-    # - coefficients are relative involvement strengths in ~[0, 1]
-    # - they are not normalized probabilities and do not need to sum to 1
-    # - they directly modulate MPC drop via involvement * drop
-    # upper_traps and brachialis removed from all entries (no longer in ALL_MUSCLES)
-    "bench_press":           {"chest": 0.85, "triceps": 0.55, "anterior_delts": 0.60},
-    "incline_bench":         {"chest": 0.70, "anterior_delts": 0.75, "triceps": 0.50},
-    "incline_bench_45":      {"chest": 0.72, "triceps": 0.68, "anterior_delts": 0.55},
-    "close_grip_bench":      {"chest": 0.65, "triceps": 0.75, "anterior_delts": 0.55},
-    "spoto_press":           {"chest": 0.75, "triceps": 0.70, "anterior_delts": 0.45},
-    "decline_bench":         {"chest": 0.78, "triceps": 0.72, "anterior_delts": 0.40},
-    "chest_press_machine":   {"chest": 0.72, "anterior_delts": 0.45, "triceps": 0.30},
-    "dumbbell_bench":        {"chest": 0.82, "triceps": 0.45, "anterior_delts": 0.55},
-    "dumbbell_flyes":        {"chest": 0.82, "anterior_delts": 0.30},
-    "ohp":                   {"anterior_delts": 0.85, "triceps": 0.65, "chest": 0.20},
-    "dumbbell_ohp":          {"anterior_delts": 0.80, "triceps": 0.60},
-    "dips":                  {"chest": 0.70, "triceps": 0.65, "anterior_delts": 0.45},
-    "skull_crusher":         {"triceps": 0.85, "anterior_delts": 0.25},
-    "barbell_row":           {"lats": 0.80, "biceps": 0.55, "rear_delts": 0.50, "erectors": 0.40, "rhomboids": 0.45},
-    "pendlay_row":           {"rear_delts": 0.82, "erectors": 0.70, "rhomboids": 0.60, "lats": 0.52},
-    "seal_row":              {"rear_delts": 0.78, "rhomboids": 0.72, "lats": 0.52, "erectors": 0.25},
-    "lat_pulldown":          {"lats": 0.75, "biceps": 0.50, "rear_delts": 0.35, "rhomboids": 0.40},
-    "cable_row":             {"lats": 0.70, "biceps": 0.45, "rear_delts": 0.40, "rhomboids": 0.50},
-    "pull_up":               {"lats": 0.82, "biceps": 0.55, "rear_delts": 0.35, "rhomboids": 0.40},
-    "reverse_fly":           {"rear_delts": 0.88, "lateral_delts": 0.65},
-    "squat":                 {"quads": 0.85, "glutes": 0.60, "hamstrings": 0.35, "erectors": 0.45, "adductors": 0.40},
-    "low_bar_squat":         {"adductors": 0.75, "erectors": 0.70, "glutes": 0.55, "quads": 0.45},
-    "high_bar_squat":        {"quads": 0.82, "glutes": 0.62, "erectors": 0.40},
-    "front_squat":           {"quads": 0.90, "glutes": 0.50, "erectors": 0.55, "adductors": 0.35},
-    "deadlift":              {"glutes": 0.70, "hamstrings": 0.55, "erectors": 0.80, "quads": 0.40, "lats": 0.30, "adductors": 0.35},
-    "sumo_deadlift":         {"quads": 0.70, "glutes": 0.60, "erectors": 0.52, "adductors": 0.45, "hamstrings": 0.40, "abs": 0.65, "calves": 0.30},
-    "rdl":                   {"hamstrings": 0.80, "glutes": 0.55, "erectors": 0.50, "adductors": 0.25},
-    "leg_press":             {"quads": 0.80, "glutes": 0.50, "adductors": 0.35},
-    "bulgarian_split_squat": {"quads": 0.80, "glutes": 0.65, "hamstrings": 0.30, "adductors": 0.40},
-    "hip_thrust":            {"glutes": 0.85, "hamstrings": 0.40, "adductors": 0.30},
-    "tricep_pushdown":       {"triceps": 0.90},
-    "overhead_tricep_ext":   {"triceps": 0.85},
-    "bicep_curl":            {"biceps": 0.90},
-    "hammer_curl":           {"biceps": 0.75},
-    "lateral_raise":         {"lateral_delts": 0.85},
-    "face_pull":             {"rear_delts": 0.70, "rhomboids": 0.35},
-    "leg_curl":              {"hamstrings": 0.85},
-    "leg_extension":         {"quads": 0.85},
-    "calf_raise":            {"calves": 0.90},
-    "plank":                 {"abs": 0.82},
-    "farmers_walk":          {"erectors": 0.70, "abs": 0.52},
-    "leg_raises":            {"abs": 0.82, "lats": 0.32, "quads": 0.28, "erectors": 0.22},
-    "ab_wheel":              {"abs": 0.88},
-    "dead_bug":              {"abs": 0.62},
-    "trx_bodysaw":           {"abs": 0.85, "erectors": 0.15},
-    "suitcase_carry":        {"abs": 0.75, "erectors": 0.65},
-    "bird_dog":              {"glutes": 0.72, "erectors": 0.68},
-}
+# ─── Exercises are loaded from YAML + transformed CSV only ────────────────
 
 _SCALED_WEIGHTS_PATH = "exercise_muscle_weights_scaled.csv"
 
@@ -111,7 +57,7 @@ _SCALED_WEIGHTS_PATH = "exercise_muscle_weights_scaled.csv"
 def _load_scaled_weights(csv_path: str = _SCALED_WEIGHTS_PATH):
     """Load exercise->muscle weights in [0,1] from EMG-derived CSV.
 
-    Priority source: replaces flat 0.7 fallback for exercises in YAML.
+    Priority source for numeric involvement coefficients.
     Expected schema: exercise_id + one column per muscle id in ALL_MUSCLES.
     """
     if not os.path.exists(csv_path):
@@ -134,41 +80,35 @@ def _load_scaled_weights(csv_path: str = _SCALED_WEIGHTS_PATH):
     return weights
 
 def _load_exercise_data(yaml_path: str = "exercise_muscle_order.yaml"):
-    """Load exercise/muscle data from exercise_muscle_order.yaml if present.
+    """Load exercise/muscle data strictly from exercise_muscle_order.yaml.
 
     Returns:
         exercise_muscles : dict[exercise_id -> dict[muscle_id -> float]]
             Numeric involvement coefficients used in the MPC update rule.
-            New exercises (from yaml, not in hardcoded dict) get rank-derived
+            Exercises missing in transformed CSV get rank-derived
             coefficients: coeff(rank r) = max(1.0 - 0.15*r, 0.3).
         exercise_ordinal : dict[exercise_id -> list[muscle_id]]
             Muscles ordered from most to least involved (primary first).
-            Used by the ordinal ordering penalty once yaml is available.
+            Used by the ordinal ordering penalty.
     """
-    fallback_ordinal = {
-        ex: sorted(ms.keys(), key=ms.get, reverse=True)
-        for ex, ms in _EXERCISE_MUSCLES_HARDCODED.items()
-    }
-
     try:
         import yaml
         with open(yaml_path, "r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-    except FileNotFoundError:
-        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Missing required file: {yaml_path}") from exc
     except Exception as exc:
-        print(f"Warning: could not load {yaml_path}: {exc}. Using hardcoded values.")
-        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+        raise RuntimeError(f"Could not load {yaml_path}: {exc}") from exc
 
     if not data or "exercises" not in data:
-        return dict(_EXERCISE_MUSCLES_HARDCODED), fallback_ordinal
+        raise RuntimeError(f"Invalid YAML structure in {yaml_path}: missing 'exercises'")
 
     scaled_weights = _load_scaled_weights()
 
     # YAML is the canonical exercise list — only exercises present in YAML are used.
     exercise_muscles = {}
     exercise_ordinal = {}
-    scaled_used = hardcoded_used = fallback_used = 0
+    scaled_used = yaml_rank_used = 0
 
     for ex_id, ex_data in data["exercises"].items():
         if not isinstance(ex_data, dict):
@@ -185,19 +125,19 @@ def _load_exercise_data(yaml_path: str = "exercise_muscle_order.yaml"):
             continue
         exercise_ordinal[ex_id] = valid_ranked
 
-        # Priority: EMG CSV → hardcoded literature → flat 0.7 fallback
+        # Priority: EMG CSV → YAML rank-derived coefficients
         if ex_id in scaled_weights:
             exercise_muscles[ex_id] = scaled_weights[ex_id]
             scaled_used += 1
-        elif ex_id in _EXERCISE_MUSCLES_HARDCODED:
-            exercise_muscles[ex_id] = _EXERCISE_MUSCLES_HARDCODED[ex_id]
-            hardcoded_used += 1
         else:
-            exercise_muscles[ex_id] = {m: 0.7 for m in valid_ranked}
-            fallback_used += 1
+            exercise_muscles[ex_id] = {
+                m: max(1.0 - 0.15 * r, 0.3)
+                for r, m in enumerate(valid_ranked)
+            }
+            yaml_rank_used += 1
 
     print(f"Exercise data: {yaml_path} — {len(exercise_muscles)} exercises "
-          f"(csv={scaled_used}, hardcoded={hardcoded_used}, fallback={fallback_used})")
+          f"(csv={scaled_used}, yaml_rank={yaml_rank_used})")
     return exercise_muscles, exercise_ordinal
 
 

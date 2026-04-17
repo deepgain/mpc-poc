@@ -19,7 +19,7 @@ M4 nieznacznie gorszy od M3 — główna przyczyna: mniejszy dataset (588k vs 87
 - **EMG weights z CSV** (`exercise_muscle_weights_scaled.csv`) jako primary source — zastąpiły flat 0.7 fallback dla 33/34 ćwiczeń. W M3 ~20 ćwiczeń miało błędne flat 0.7 involvement.
 - **Nowy dataset Aleksandra** — 57 peer-reviewed sources, lepsza jakość generatora
 - **34 ćwiczenia** (tylko te z yaml, nie union z hardkodowanymi jak w M3)
-- `spoto_press` — jedyne ćwiczenie bez danych EMG w CSV, fallback na hardkod
+- `spoto_press` — dane EMG uzupełnione (proxy z Fischer 2025, UROM Table 2), bez zer w CSV
 
 ## Per-exercise MAE
 
