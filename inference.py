@@ -20,6 +20,7 @@ Usage:
 """
 
 import math
+import os
 from datetime import datetime
 
 import numpy as np
@@ -38,64 +39,90 @@ else:
     _DEFAULT_DEVICE = torch.device("cpu")
 
 # ─── Constants (must stay in sync with train.py) ────────────────────────────
-EMBED_DIM = 32
-HIDDEN_DIM = 128
+EMBED_DIM    = 32
+HIDDEN_DIM   = 128
 WEIGHT_SCALE = 200.0
-REPS_SCALE = 30.0
-RIR_SCALE = 5.0
-DT_SCALE = np.log1p(168.0)
+REPS_SCALE   = 30.0
+RIR_SCALE    = 5.0
+DT_SCALE     = np.log1p(168.0)
 
+# ─── Muscles (15 groups — matches train.py exactly) ─────────────────────────
 ALL_MUSCLES = [
     "chest", "anterior_delts", "lateral_delts", "rear_delts",
-    "upper_traps", "rhomboids", "triceps", "biceps", "brachialis",
+    "rhomboids", "triceps", "biceps",
     "lats", "quads", "hamstrings", "glutes", "adductors", "erectors", "calves",
+    "abs",
 ]
-NUM_MUSCLES = len(ALL_MUSCLES)
+NUM_MUSCLES   = len(ALL_MUSCLES)
 MUSCLE_TO_IDX = {m: i for i, m in enumerate(ALL_MUSCLES)}
 
-# Hardcoded involvement — will be replaced by exercise_muscle_order.yaml once delivered
-EXERCISE_MUSCLES = {
-    "bench_press":           {"chest": 0.85, "triceps": 0.55, "anterior_delts": 0.60},
-    "incline_bench":         {"chest": 0.70, "anterior_delts": 0.75, "triceps": 0.50},
-    "close_grip_bench":      {"chest": 0.65, "triceps": 0.75, "anterior_delts": 0.55},
-    "dumbbell_bench":        {"chest": 0.82, "triceps": 0.45, "anterior_delts": 0.55},
-    "ohp":                   {"anterior_delts": 0.85, "triceps": 0.65, "chest": 0.20, "upper_traps": 0.40},
-    "dumbbell_ohp":          {"anterior_delts": 0.80, "triceps": 0.60, "upper_traps": 0.35},
-    "dips":                  {"chest": 0.70, "triceps": 0.65, "anterior_delts": 0.45},
-    "barbell_row":           {"lats": 0.80, "biceps": 0.55, "rear_delts": 0.50, "erectors": 0.40, "upper_traps": 0.35, "rhomboids": 0.45},
-    "lat_pulldown":          {"lats": 0.75, "biceps": 0.50, "rear_delts": 0.35, "rhomboids": 0.40},
-    "cable_row":             {"lats": 0.70, "biceps": 0.45, "rear_delts": 0.40, "rhomboids": 0.50, "upper_traps": 0.30},
-    "pull_up":               {"lats": 0.82, "biceps": 0.55, "rear_delts": 0.35, "rhomboids": 0.40},
-    "squat":                 {"quads": 0.85, "glutes": 0.60, "hamstrings": 0.35, "erectors": 0.45, "adductors": 0.40},
-    "front_squat":           {"quads": 0.90, "glutes": 0.50, "erectors": 0.55, "adductors": 0.35},
-    "deadlift":              {"glutes": 0.70, "hamstrings": 0.55, "erectors": 0.80, "quads": 0.40, "upper_traps": 0.50, "lats": 0.30, "adductors": 0.35},
-    "rdl":                   {"hamstrings": 0.80, "glutes": 0.55, "erectors": 0.50, "adductors": 0.25},
-    "leg_press":             {"quads": 0.80, "glutes": 0.50, "adductors": 0.35},
-    "bulgarian_split_squat": {"quads": 0.80, "glutes": 0.65, "hamstrings": 0.30, "adductors": 0.40},
-    "hip_thrust":            {"glutes": 0.85, "hamstrings": 0.40, "adductors": 0.30},
-    "tricep_pushdown":       {"triceps": 0.90},
-    "overhead_tricep_ext":   {"triceps": 0.85},
-    "bicep_curl":            {"biceps": 0.90},
-    "hammer_curl":           {"biceps": 0.75, "brachialis": 0.60},
-    "lateral_raise":         {"lateral_delts": 0.85, "upper_traps": 0.30},
-    "face_pull":             {"rear_delts": 0.70, "upper_traps": 0.40, "rhomboids": 0.35},
-    "leg_curl":              {"hamstrings": 0.85},
-    "leg_extension":         {"quads": 0.85},
-    "calf_raise":            {"calves": 0.90},
-}
+# ─── Exercise loading (YAML + EMG CSV — same priority as train.py) ───────────
 
-ALL_EXERCISES = list(EXERCISE_MUSCLES.keys())
-NUM_EXERCISES = len(ALL_EXERCISES)
-EXERCISE_TO_IDX = {e: i for i, e in enumerate(ALL_EXERCISES)}
+def _load_scaled_weights(csv_path="exercise_muscle_weights_scaled.csv"):
+    """Load EMG-derived involvement weights from CSV."""
+    import pandas as pd
+    if not os.path.exists(csv_path):
+        return {}
+    df = pd.read_csv(csv_path)
+    if any(m not in df.columns for m in ALL_MUSCLES):
+        return {}
+    weights = {}
+    for _, row in df.iterrows():
+        ex_id = str(row["exercise_id"])
+        ex_w  = {m: float(np.clip(row[m], 0.0, 1.0)) for m in ALL_MUSCLES if float(row[m]) > 0.0}
+        if ex_w:
+            weights[ex_id] = ex_w
+    return weights
+
+
+def _load_exercise_data(yaml_path="exercise_muscle_order.yaml"):
+    """Load exercise list from YAML + EMG CSV. Raises RuntimeError if YAML missing."""
+    import yaml
+    try:
+        with open(yaml_path, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Missing required file: {yaml_path}") from exc
+
+    scaled_weights   = _load_scaled_weights()
+    exercise_muscles = {}
+
+    for ex_id, ex_data in data["exercises"].items():
+        if not isinstance(ex_data, dict):
+            continue
+        ranked = (
+            (ex_data.get("primary_muscles")   or [])
+            + (ex_data.get("secondary_muscles") or [])
+            + (ex_data.get("tertiary_muscles")  or [])
+        )
+        valid_ranked = [m for m in ranked if m in MUSCLE_TO_IDX]
+        if not valid_ranked:
+            continue
+        if ex_id in scaled_weights:
+            exercise_muscles[ex_id] = scaled_weights[ex_id]
+        else:
+            exercise_muscles[ex_id] = {
+                m: max(1.0 - 0.15 * r, 0.3)
+                for r, m in enumerate(valid_ranked)
+            }
+
+    return exercise_muscles
+
+
+EXERCISE_MUSCLES  = _load_exercise_data()
+ALL_EXERCISES     = list(EXERCISE_MUSCLES.keys())
+NUM_EXERCISES     = len(ALL_EXERCISES)
+EXERCISE_TO_IDX   = {e: i for i, e in enumerate(ALL_EXERCISES)}
 
 INVOLVEMENT_MATRIX = np.zeros((NUM_EXERCISES, NUM_MUSCLES), dtype=np.float32)
 for _ex, _ms in EXERCISE_MUSCLES.items():
     _ei = EXERCISE_TO_IDX[_ex]
     for _m, _c in _ms.items():
-        INVOLVEMENT_MATRIX[_ei, MUSCLE_TO_IDX[_m]] = _c
+        if _m in MUSCLE_TO_IDX:
+            INVOLVEMENT_MATRIX[_ei, MUSCLE_TO_IDX[_m]] = _c
 
 
-# ─── Model Architecture (mirrors train.py) ──────────────────────────────────
+# ─── Model Architecture (mirrors train.py exactly) ──────────────────────────
 
 class FatigueNet(nn.Module):
     def __init__(self, embed_dim, hidden_dim):
@@ -106,7 +133,6 @@ class FatigueNet(nn.Module):
             nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(),
             nn.Linear(hidden_dim // 2, 1), nn.Sigmoid(),
         )
-        nn.init.constant_(self.net[-2].bias, -2.0)
 
     def forward(self, weight, reps, rir, mpc, e_embed, m_embed):
         x = torch.cat([
@@ -136,17 +162,15 @@ class RIRNet(nn.Module):
 
 
 class ExponentialRecovery(nn.Module):
-    # Literature-derived τ values (hours) — matches train.py exactly
+    # Literature-derived τ values (hours) — matches train.py exactly, 15 muscles
     FIXED_TAU = [
         16.0,  # chest
         13.0,  # anterior_delts
          9.0,  # lateral_delts
          8.0,  # rear_delts
-         9.0,  # upper_traps
         10.0,  # rhomboids
          9.0,  # triceps
         13.0,  # biceps
-        13.0,  # brachialis
         13.0,  # lats
         19.0,  # quads
         18.0,  # hamstrings
@@ -154,6 +178,7 @@ class ExponentialRecovery(nn.Module):
         12.0,  # adductors
         12.0,  # erectors
          8.0,  # calves
+        10.0,  # abs
     ]
 
     def __init__(self, num_muscles):
@@ -164,19 +189,19 @@ class ExponentialRecovery(nn.Module):
     def forward(self, mpc, delta_t, muscle_idx):
         """mpc: (N,), delta_t: (N,) normalized, muscle_idx: (N,) long."""
         dt_hours = torch.expm1(delta_t * DT_SCALE)
-        tau = torch.exp(self.log_tau[muscle_idx])
+        tau      = torch.exp(self.log_tau[muscle_idx])
         return 1.0 - (1.0 - mpc) * torch.exp(-dt_hours / tau)
 
 
 class DeepGainModel(nn.Module):
     def __init__(self, num_exercises, num_muscles, embed_dim, hidden_dim):
         super().__init__()
-        self.num_muscles = num_muscles
+        self.num_muscles    = num_muscles
         self.exercise_embed = nn.Embedding(num_exercises, embed_dim)
-        self.muscle_embed = nn.Embedding(num_muscles, embed_dim)
+        self.muscle_embed   = nn.Embedding(num_muscles, embed_dim)
         self.f_net = FatigueNet(embed_dim, hidden_dim)
         self.g_net = RIRNet(embed_dim, hidden_dim, num_muscles)
-        self.r = ExponentialRecovery(num_muscles)
+        self.r     = ExponentialRecovery(num_muscles)
         self.register_buffer(
             "involvement",
             torch.tensor(INVOLVEMENT_MATRIX, dtype=torch.float32),
@@ -198,11 +223,11 @@ def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
     if device is None:
         device = _DEFAULT_DEVICE
     model = DeepGainModel(NUM_EXERCISES, NUM_MUSCLES, EMBED_DIM, HIDDEN_DIM)
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    ckpt  = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt.get("model_state_dict", ckpt))
     model = model.to(device)
     model.eval()
-    # Attach per-exercise weight normalization ranges (saved since M5)
+    # Attach per-exercise weight normalization ranges (saved since M5).
     # Falls back to global WEIGHT_SCALE for older checkpoints.
     if "weight_p5" in ckpt and "weight_p95" in ckpt:
         model.weight_p5  = np.asarray(ckpt["weight_p5"],  dtype=np.float32)
@@ -245,8 +270,8 @@ def predict_mpc(
         mpc = predict_mpc(model, history, "2024-01-02T09:00:00")
         # {"chest": 0.72, "triceps": 0.88, "quads": 1.0, ...}
     """
-    device = next(model.parameters()).device
-    ts_query = _parse_timestamp(timestamp)
+    device    = next(model.parameters()).device
+    ts_query  = _parse_timestamp(timestamp)
 
     # Filter to known exercises at or before the query timestamp, sort by time
     valid = []
@@ -259,9 +284,9 @@ def predict_mpc(
             continue
         valid.append({
             "exercise_idx": EXERCISE_TO_IDX[ex],
-            "weight":  _normalize_weight(model, float(entry["weight_kg"]), EXERCISE_TO_IDX[ex]),
-            "reps":    float(entry["reps"]) / REPS_SCALE,
-            "rir":     float(entry["rir"]) / RIR_SCALE,
+            "weight":    _normalize_weight(model, float(entry["weight_kg"]), EXERCISE_TO_IDX[ex]),
+            "reps":      float(entry["reps"]) / REPS_SCALE,
+            "rir":       float(entry["rir"])  / RIR_SCALE,
             "timestamp": ts,
         })
 
@@ -270,41 +295,39 @@ def predict_mpc(
 
     valid.sort(key=lambda x: x["timestamp"])
 
-    M = model.num_muscles
-    all_m_idx = torch.arange(M, device=device)
-    all_m_embed = model.muscle_embed(all_m_idx)          # (M, E)
-    E = all_m_embed.shape[-1]
-    all_m_embed_exp = all_m_embed.unsqueeze(0)            # (1, M, E)
-    m_idx_flat = all_m_idx                                # (M,)
+    M            = model.num_muscles
+    all_m_idx    = torch.arange(M, device=device)
+    all_m_embed  = model.muscle_embed(all_m_idx)       # (M, E)
+    E            = all_m_embed.shape[-1]
 
     with torch.no_grad():
-        mpc = torch.ones(1, M, device=device)             # (1, M)
-        prev_ts = valid[0]["timestamp"]
+        mpc      = torch.ones(1, M, device=device)     # (1, M)
+        prev_ts  = valid[0]["timestamp"]
 
         for i, s in enumerate(valid):
-            # Recovery since previous set (skip for first set)
+            # Recovery since previous set
             if i > 0:
                 dt_h = (s["timestamp"] - prev_ts).total_seconds() / 3600.0
                 if dt_h > 0:
                     dt_norm = torch.tensor(
                         [np.log1p(dt_h) / DT_SCALE], dtype=torch.float32, device=device
                     ).expand(M)
-                    mpc = model.r(mpc.reshape(-1), dt_norm, m_idx_flat).reshape(1, M)
+                    mpc = model.r(mpc.reshape(-1), dt_norm, all_m_idx).reshape(1, M)
 
             # Fatigue from this set
-            ei = torch.tensor([s["exercise_idx"]], dtype=torch.long, device=device)
-            e_embed = model.exercise_embed(ei)                            # (1, E)
-            inv = model.involvement[ei]                                   # (1, M)
+            ei    = torch.tensor([s["exercise_idx"]], dtype=torch.long, device=device)
+            e_emb = model.exercise_embed(ei)                                   # (1, E)
+            inv   = model.involvement[ei]                                      # (1, M)
 
-            e_emb_exp = e_embed.unsqueeze(1).expand(-1, M, -1).reshape(-1, E)  # (M, E)
-            w_exp   = torch.full((M,), s["weight"], dtype=torch.float32, device=device)
-            r_exp   = torch.full((M,), s["reps"],   dtype=torch.float32, device=device)
-            rir_exp = torch.full((M,), s["rir"],    dtype=torch.float32, device=device)
-            mpc_flat   = mpc.reshape(-1)                                  # (M,)
-            m_emb_flat = all_m_embed_exp.reshape(-1, E)                   # (M, E)
+            e_emb_exp = e_emb.unsqueeze(1).expand(-1, M, -1).reshape(-1, E)   # (M, E)
+            w_exp     = torch.full((M,), s["weight"], dtype=torch.float32, device=device)
+            r_exp     = torch.full((M,), s["reps"],   dtype=torch.float32, device=device)
+            rir_exp   = torch.full((M,), s["rir"],    dtype=torch.float32, device=device)
+            mpc_flat  = mpc.reshape(-1)                                        # (M,)
+            m_emb_flat = all_m_embed.reshape(-1, E)                            # (M, E)
 
             drop = model.f_net(w_exp, r_exp, rir_exp, mpc_flat, e_emb_exp, m_emb_flat)
-            mpc = (mpc * (1.0 - inv * drop.reshape(1, M))).clamp(min=0.1)
+            mpc  = (mpc * (1.0 - inv * drop.reshape(1, M))).clamp(min=0.1)
 
             prev_ts = s["timestamp"]
 
@@ -314,7 +337,7 @@ def predict_mpc(
             dt_norm = torch.tensor(
                 [np.log1p(dt_final) / DT_SCALE], dtype=torch.float32, device=device
             ).expand(M)
-            mpc = model.r(mpc.reshape(-1), dt_norm, m_idx_flat).reshape(1, M)
+            mpc = model.r(mpc.reshape(-1), dt_norm, all_m_idx).reshape(1, M)
 
         mpc_np = mpc[0].cpu().numpy()
 
@@ -353,17 +376,19 @@ def predict_rir(
     if exercise not in EXERCISE_TO_IDX:
         raise ValueError(
             f"Unknown exercise '{exercise}'. "
-            f"Known: {ALL_EXERCISES}"
+            f"Known: {sorted(ALL_EXERCISES)}"
         )
 
-    device = next(model.parameters()).device
-
+    device  = next(model.parameters()).device
     mpc_vals = [state.get(m, 1.0) for m in ALL_MUSCLES]
-    mpc_t = torch.tensor([mpc_vals], dtype=torch.float32, device=device)   # (1, M)
-    w_t   = torch.tensor([_normalize_weight(model, weight, EXERCISE_TO_IDX[exercise])], dtype=torch.float32, device=device)
-    r_t   = torch.tensor([reps / REPS_SCALE],     dtype=torch.float32, device=device)
-    ei    = torch.tensor([EXERCISE_TO_IDX[exercise]], dtype=torch.long, device=device)
-    e_emb = model.exercise_embed(ei)                                         # (1, E)
+    mpc_t    = torch.tensor([mpc_vals], dtype=torch.float32, device=device)
+    w_t      = torch.tensor(
+        [_normalize_weight(model, weight, EXERCISE_TO_IDX[exercise])],
+        dtype=torch.float32, device=device,
+    )
+    r_t  = torch.tensor([reps / REPS_SCALE], dtype=torch.float32, device=device)
+    ei   = torch.tensor([EXERCISE_TO_IDX[exercise]], dtype=torch.long, device=device)
+    e_emb = model.exercise_embed(ei)
 
     with torch.no_grad():
         rir_norm = model.g_net(w_t, r_t, e_emb, mpc_t)
@@ -380,7 +405,7 @@ def get_muscles() -> list[str]:
 
 def get_exercises() -> list[str]:
     """Return all exercise IDs recognized by the current model."""
-    return list(ALL_EXERCISES)
+    return sorted(ALL_EXERCISES)
 
 
 def _normalize_weight(model: "DeepGainModel", weight_kg: float, exercise_idx: int) -> float:
@@ -388,7 +413,7 @@ def _normalize_weight(model: "DeepGainModel", weight_kg: float, exercise_idx: in
     if model.weight_p5 is not None:
         p5  = float(model.weight_p5[exercise_idx])
         p95 = float(model.weight_p95[exercise_idx])
-        return float(np.clip((weight_kg - p5) / (p95 - p5), 0.0, 1.0))
+        return float(np.clip((weight_kg - p5) / max(p95 - p5, 1.0), 0.0, 1.0))
     return weight_kg / WEIGHT_SCALE
 
 
