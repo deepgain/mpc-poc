@@ -1,0 +1,455 @@
+{
+  "exercises": {
+    "low_bar_przysiad_squat": {
+      "name": "Low Bar Przysiad (Squat)",
+      "category": "A. Ćwiczenia Główne",
+      "type": "compound",
+      "muscle_engagement": {
+        "multifidus": 0.3315392895586652,
+        "hip_adductors": 0.38643702906350913,
+        "calves": 0.28202368137782563
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "back_squat": {
+      "name": "Back squat",
+      "category": "A. Ćwiczenia Główne",
+      "type": "compound",
+      "muscle_engagement": {
+        "erector_spinae": 0.28936170212765955,
+        "quadriceps": 0.3468085106382979,
+        "hamstring": 0.16666666666666666,
+        "glutes": 0.19716312056737592
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "wyciskanie_leżąc_bench_press": {
+      "name": "Wyciskanie Leżąc (Bench Press)",
+      "category": "A. Ćwiczenia Główne",
+      "type": "compound",
+      "muscle_engagement": {
+        "chest_upper": 0.4391395592864638,
+        "chest_lower": 0.4223504721930745,
+        "shoulder_front": 0.11227701993704091,
+        "shoulder_side": 0.026232948583420776
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "martwy_ciąg_deadlift": {
+      "name": "Martwy Ciąg (Deadlift)",
+      "category": "A. Ćwiczenia Główne",
+      "type": "compound",
+      "muscle_engagement": {
+        "quadriceps": 0.6450320512820513,
+        "glutes": 0.3549679487179487
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "high_bar_squat": {
+      "name": "High Bar Squat",
+      "category": "B. Wariacje (Przysiad)",
+      "type": "compound_variation",
+      "muscle_engagement": {
+        "quadriceps": 0.5681024447031432,
+        "glutes": 0.4318975552968568
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "close_grip_bench_press": {
+      "name": "Close Grip Bench Press",
+      "category": "B. Wariacje (Wyciskanie)",
+      "type": "compound_variation",
+      "muscle_engagement": {
+        "chest_upper": 0.5710076605774898,
+        "chest_lower": 0.4289923394225103
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "spoto_press": {
+      "name": "Spoto Press",
+      "category": "B. Wariacje (Wyciskanie)",
+      "type": "compound_variation",
+      "muscle_engagement": {},
+      "estimated_time_per_set_sec": 120
+    },
+    "incline_bench_press": {
+      "name": "Incline Bench Press",
+      "category": "B. Wariacje (Wyciskanie)",
+      "type": "compound_variation",
+      "muscle_engagement": {
+        "chest_upper": 0.6068211068211069,
+        "chest_lower": 0.3931788931788932
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "rozpiętki_dumbbell_flyes": {
+      "name": "Rozpiętki (Dumbbell Flyes)",
+      "category": "B. Wariacje (Wyciskanie)",
+      "type": "compound_variation",
+      "muscle_engagement": {
+        "chest_upper": 0.40909090909090906,
+        "chest_lower": 0.40909090909090906,
+        "shoulder_front": 0.18181818181818182
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "sumo_deadlift": {
+      "name": "Sumo Deadlift",
+      "category": "B. Wariacje (Martwy Ciąg)",
+      "type": "compound_variation",
+      "muscle_engagement": {
+        "erector_spinae": 0.12260536398467434,
+        "abs": 0.2222222222222222,
+        "quadriceps": 0.1839080459770115,
+        "hamstring": 0.1111111111111111,
+        "glutes": 0.1417624521072797,
+        "hip_adductors": 0.08812260536398468,
+        "calves": 0.1302681992337165
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "bulgarian_split_squat": {
+      "name": "Bulgarian Split Squat",
+      "category": "C. Akcesoria (Dół ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "erector_spinae": 0.24172185430463577,
+        "quadriceps": 0.3864711447492905,
+        "hamstring": 0.07521286660359508,
+        "glutes": 0.2965941343424787
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "leg_press": {
+      "name": "Leg Press",
+      "category": "C. Akcesoria (Dół ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "quadriceps": 0.5576923076923076,
+        "hamstring": 0.17307692307692307,
+        "glutes": 0.2692307692307693
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "romanian_deadlift_rdl": {
+      "name": "Romanian Deadlift (RDL)",
+      "category": "C. Akcesoria (Dół ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "hamstring": 1.0
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "leg_curl_uginanie_nóg": {
+      "name": "Leg Curl (Uginanie nóg)",
+      "category": "C. Akcesoria (Dół ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "hamstring": 1.0
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "leg_extension": {
+      "name": "Leg Extension",
+      "category": "C. Akcesoria (Dół ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "quadriceps": 1.0
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "incline_bench_press_45": {
+      "name": "Incline Bench Press (45°)",
+      "category": "B. Wariacje (Wyciskanie)",
+      "type": "compound_variation",
+      "muscle_engagement": {
+        "chest_upper": 0.6068211068211069,
+        "chest_lower": 0.3931788931788932
+      },
+      "estimated_time_per_set_sec": 120
+    },
+    "chest_press_maszyna_siedząc": {
+      "name": "Chest Press (Maszyna siedząc)",
+      "category": "C. Akcesoria (Góra ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "chest_upper": 0.4441197954711469,
+        "chest_lower": 0.5558802045288532
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "dips_pompki_na_poręczach_szerokie": {
+      "name": "Dips (Pompki na poręczach - szerokie)",
+      "category": "C. Akcesoria (Góra ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "chest_upper": 0.20152261531571877,
+        "chest_lower": 0.37886251679355126,
+        "oblique_ext": 0.41961486789073
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "overhead_press_ohp": {
+      "name": "Overhead Press (OHP)",
+      "category": "C. Akcesoria (Góra ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "chest_upper": 0.32613636363636367,
+        "chest_lower": 0.32613636363636367,
+        "shoulder_front": 0.18920454545454546,
+        "shoulder_side": 0.1585227272727273
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "decline_bench_press": {
+      "name": "Decline Bench Press",
+      "category": "C. Akcesoria (Góra ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "chest_upper": 0.4578754578754579,
+        "chest_lower": 0.5421245421245422
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "wyciskanie_francuskie": {
+      "name": "Wyciskanie Francuskie",
+      "category": "C. Akcesoria (Góra ciała)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "chest_upper": 0.5,
+        "chest_lower": 0.5
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "pendlay_row_barbell_row": {
+      "name": "Pendlay Row / Barbell Row",
+      "category": "C. Akcesoria (Plecy)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "lats": 0.17459677419354838,
+        "rhomboid": 0.21088709677419357,
+        "shoulder_rear": 0.32943548387096777,
+        "erector_spinae": 0.28508064516129034
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "pullups": {
+      "name": "Pull-ups",
+      "category": "C. Akcesoria (Plecy)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "rhomboid": 1.0
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "lat_pulldown": {
+      "name": "Lat Pulldown",
+      "category": "C. Akcesoria (Plecy)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "lats": 0.3402777777777778,
+        "rhomboid": 0.2638888888888889,
+        "shoulder_rear": 0.20833333333333334,
+        "biceps": 0.18750000000000003
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "reverse_fly_maszyna": {
+      "name": "Reverse Fly (Maszyna)",
+      "category": "C. Akcesoria (Plecy)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "shoulder_side": 0.4537205081669691,
+        "shoulder_rear": 0.5462794918330308
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "seal_row": {
+      "name": "Seal Row",
+      "category": "C. Akcesoria (Plecy)",
+      "type": "isolation",
+      "muscle_engagement": {
+        "lats": 0.16436081903707803,
+        "rhomboid": 0.29330381848367465,
+        "shoulder_rear": 0.4111787493082457,
+        "erector_spinae": 0.13115661317100166
+      },
+      "estimated_time_per_set_sec": 60
+    },
+    "plank_deska": {
+      "name": "Plank (Deska)",
+      "category": "D. Stabilizacja i Core",
+      "type": "core",
+      "muscle_engagement": {
+        "abs": 1.0
+      },
+      "estimated_time_per_set_sec": 45
+    },
+    "farmers_walk": {
+      "name": "Farmer’s Walk",
+      "category": "D. Stabilizacja i Core",
+      "type": "core",
+      "muscle_engagement": {
+        "erector_spinae": 0.34968017057569295,
+        "multifidus": 0.3475479744136461,
+        "oblique_ext": 0.30277185501066095
+      },
+      "estimated_time_per_set_sec": 45
+    },
+    "wznosy_nóg_w_zwisie": {
+      "name": "Wznosy nóg w zwisie",
+      "category": "D. Stabilizacja i Core",
+      "type": "core",
+      "muscle_engagement": {
+        "lats": 0.1065989847715736,
+        "erector_spinae": 0.03553299492385787,
+        "abs": 0.3807106598984772,
+        "quadriceps": 0.07614213197969542,
+        "oblique_ext": 0.401015228426396
+      },
+      "estimated_time_per_set_sec": 45
+    },
+    "ab_wheel_rollout_kółko": {
+      "name": "Ab Wheel Rollout (Kółko)",
+      "category": "D. Stabilizacja i Core",
+      "type": "core",
+      "muscle_engagement": {
+        "abs": 1.0
+      },
+      "estimated_time_per_set_sec": 45
+    },
+    "dead_bug_60_bpm_wolne_tempo": {
+      "name": "Dead Bug (60 bpm - wolne tempo)",
+      "category": "D. Stabilizacja i Core",
+      "type": "core",
+      "muscle_engagement": {
+        "abs": 0.30325187608235515,
+        "oblique_ext": 0.34452568789686355,
+        "oblique_int": 0.3522224360207812
+      },
+      "estimated_time_per_set_sec": 45
+    },
+    "trx_bodysaw": {
+      "name": "TRX Bodysaw",
+      "category": "D. Stabilizacja i Core",
+      "type": "core",
+      "muscle_engagement": {
+        "erector_spinae": 0.023054755043227664,
+        "abs": 0.45244956772334294,
+        "oblique_ext": 0.34005763688760804,
+        "oblique_int": 0.1844380403458213
+      },
+      "estimated_time_per_set_sec": 45
+    },
+    "suitcase_carry": {
+      "name": "Suitcase Carry",
+      "category": "D. Stabilizacja i Core",
+      "type": "core",
+      "muscle_engagement": {
+        "erector_spinae": 0.28529411764705886,
+        "abs": 0.1852941176470588,
+        "multifidus": 0.20588235294117646,
+        "oblique_ext": 0.3235294117647059
+      },
+      "estimated_time_per_set_sec": 45
+    },
+    "bird_dog_piesptak": {
+      "name": "Bird Dog (Pies-ptak)",
+      "category": "D. Stabilizacja i Core",
+      "type": "core",
+      "muscle_engagement": {
+        "erector_spinae": 0.22916666666666669,
+        "glutes": 0.33333333333333337,
+        "multifidus": 0.25,
+        "glute_med": 0.1875
+      },
+      "estimated_time_per_set_sec": 45
+    }
+  },
+  "target_fatigue_zones": {
+    "abs": [
+      0.2,
+      0.5
+    ],
+    "biceps": [
+      0.25,
+      0.55
+    ],
+    "calves": [
+      0.25,
+      0.55
+    ],
+    "chest_lower": [
+      0.2,
+      0.45
+    ],
+    "chest_upper": [
+      0.2,
+      0.45
+    ],
+    "erector_spinae": [
+      0.15,
+      0.4
+    ],
+    "glute_med": [
+      0.25,
+      0.55
+    ],
+    "glutes": [
+      0.15,
+      0.4
+    ],
+    "hamstring": [
+      0.15,
+      0.4
+    ],
+    "hip_adductors": [
+      0.25,
+      0.55
+    ],
+    "lats": [
+      0.15,
+      0.4
+    ],
+    "multifidus": [
+      0.1,
+      0.35
+    ],
+    "oblique_ext": [
+      0.1,
+      0.35
+    ],
+    "oblique_int": [
+      0.1,
+      0.35
+    ],
+    "quadriceps": [
+      0.15,
+      0.4
+    ],
+    "rhomboid": [
+      0.1,
+      0.35
+    ],
+    "shoulder_front": [
+      0.2,
+      0.45
+    ],
+    "shoulder_rear": [
+      0.2,
+      0.45
+    ],
+    "shoulder_side": [
+      0.2,
+      0.45
+    ]
+  },
+  "default_reps_by_type": {
+    "compound": 8,
+    "compound_variation": 8,
+    "isolation": 12,
+    "core": 10
+  },
+  "default_time_per_rep_sec": 2.5,
+  "rest_between_sets_sec": 120
+}
