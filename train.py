@@ -30,7 +30,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 32
 HIDDEN_DIM = 128
 LR = 1e-3
-EPOCHS = 150
+EPOCHS = 20
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -519,6 +519,41 @@ class DeepGainModel(nn.Module):
 
         return penalty / max(n_pairs, 1)
 
+    def minimum_drop_penalty(self, min_fraction: float = 0.15):
+        """Penalize f when involved muscles have near-zero drops (muscle collapse).
+
+        For each exercise, each muscle with non-zero involvement should produce
+        a drop of at least min_fraction * involvement from f_net.
+        Probes at the same reference point as fatigue_ordering_penalty.
+
+        min_fraction=0.15 means: a muscle with involvement=0.6 should drop ≥ 0.09.
+        """
+        device = self.involvement.device
+        penalty = torch.tensor(0.0, device=device)
+        n_muscles = 0
+
+        w   = torch.tensor([0.4],  dtype=torch.float32, device=device)
+        r   = torch.tensor([0.27], dtype=torch.float32, device=device)
+        rir = torch.tensor([0.4],  dtype=torch.float32, device=device)
+        mpc = torch.tensor([1.0],  dtype=torch.float32, device=device)
+
+        for ei in range(len(ALL_EXERCISES)):
+            inv = self.involvement[ei]  # (M,)
+            involved = (inv > 0).nonzero(as_tuple=True)[0]
+            if len(involved) == 0:
+                continue
+
+            e_embed = self.exercise_embed(torch.tensor([ei], device=device))
+
+            for mi in involved:
+                m_embed = self.muscle_embed(mi.unsqueeze(0))
+                drop = self.f_net(w, r, rir, mpc, e_embed, m_embed)
+                min_expected = min_fraction * inv[mi]
+                penalty = penalty + torch.relu(min_expected - drop)
+                n_muscles += 1
+
+        return penalty / max(n_muscles, 1)
+
     def forward(self, exercise_idx, weight, reps, rir_target, delta_t, mask):
         B, T = exercise_idx.shape
         M = self.num_muscles
@@ -656,6 +691,7 @@ for epoch in range(EPOCHS):
                             batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
         loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
         loss = loss + 0.05 * model.fatigue_ordering_penalty()
+        loss = loss + 0.10 * model.minimum_drop_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -699,10 +735,11 @@ for epoch in range(EPOCHS):
 
     with torch.no_grad():
         ord_penalty = model.fatigue_ordering_penalty().item()
+        min_penalty = model.minimum_drop_penalty().item()
 
     print(f"Epoch {epoch+1:3d}/{EPOCHS} | "
           f"Train RMSE: {train_rmse:.2f} RIR | Val RMSE: {val_rmse:.2f} RIR | "
-          f"ord_pen: {ord_penalty:.4f} | {elapsed:.0f}s", flush=True)
+          f"ord_pen: {ord_penalty:.4f} | min_pen: {min_penalty:.4f} | {elapsed:.0f}s", flush=True)
     print(recovery_str, flush=True)
     print(tau_all_str, flush=True)
 
