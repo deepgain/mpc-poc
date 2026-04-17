@@ -93,10 +93,22 @@ get_muscles()
 
 ## Model
 
-`deepgain_model_muscle_ord.pt` — M4 (Milestone 4)
-- Val RMSE: **0.869 RIR**, MAE: 0.673, R: 0.878
+`deepgain_model_muscle_ord.pt` — M5 (Milestone 5)
+- Val RMSE: **0.963 RIR**, MAE: 0.753, R: 0.842, ordering accuracy: 93%
 - 34 exercises, 15 muscles
-- Trained on 588k sets from 155 users
+- Trained on 723k sets from 218 users (per-user 70/30 holdout — clean val)
+- Per-exercise weight normalization (p5/p95 saved in checkpoint)
+
+Note: M5 RMSE is higher than M4 (0.869) because M4 used a flawed validation
+split where all users appeared in both train and val. M5 uses a proper per-user
+holdout — the numbers are honest.
+
+### Required files
+
+All three files must be in the working directory (already included on this branch):
+- `deepgain_model_muscle_ord.pt`
+- `exercise_muscle_order.yaml`
+- `exercise_muscle_weights_scaled.csv`
 
 ## Dependencies
 
