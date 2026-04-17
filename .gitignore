@@ -8,3 +8,4 @@ chart_*.png
 !charts/**/chart_*.png
 .claude/
 *.pt
+!deepgain_model_muscle_ord.pt

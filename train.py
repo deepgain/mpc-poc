@@ -28,9 +28,9 @@ print(f"Device: {DEVICE}")
 
 # ─── Hyperparameters ───
 EMBED_DIM = 32
-HIDDEN_DIM = 128
+HIDDEN_DIM = 256
 LR = 1e-3
-EPOCHS = 150
+EPOCHS = 50
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -172,33 +172,68 @@ def _load_split(path):
     df["delta_t_hours"] = df["delta_t_hours"].fillna(0.0)
     return df
 
+print("Loading data...")
+# Per-user 70/30 split — preserves complete user sequences in val (no MPC state leakage).
+# Falls back to pre-split files if full CSV not available.
+_FULL_CSV = "training_data_michal_full.csv"
 _SPLIT_CANDIDATES = [
     ("training_data_train.csv", "training_data_val.csv"),
     ("generated_datasets/baseline_main/training_data_train.csv",
      "generated_datasets/baseline_main/training_data_val.csv"),
 ]
 
-print("Loading data...")
-_loaded = False
-for _train_path, _val_path in _SPLIT_CANDIDATES:
-    if os.path.exists(_train_path) and os.path.exists(_val_path):
-        train_df = _load_split(_train_path)
-        test_df  = _load_split(_val_path)
-        print(f"Loaded pre-split files: {_train_path}")
-        _loaded = True
-        break
-if not _loaded:
-    df = _load_split("training_data.csv")
+if os.path.exists(_FULL_CSV):
+    df = _load_split(_FULL_CSV)
     user_ids = df["user_id"].unique()
     rng = np.random.RandomState(42)
     rng.shuffle(user_ids)
     split = int(0.7 * len(user_ids))
     train_df = df[df["user_id"].isin(set(user_ids[:split]))].copy()
     test_df  = df[df["user_id"].isin(set(user_ids[split:]))].copy()
-    print(f"Loaded training_data.csv, split 70/30")
+    print(f"Loaded {_FULL_CSV}, per-user 70/30 split ({len(set(user_ids[:split]))} train / {len(set(user_ids[split:]))} val users)")
+else:
+    _loaded = False
+    for _train_path, _val_path in _SPLIT_CANDIDATES:
+        if os.path.exists(_train_path) and os.path.exists(_val_path):
+            train_df = _load_split(_train_path)
+            test_df  = _load_split(_val_path)
+            print(f"Loaded pre-split files: {_train_path}")
+            _loaded = True
+            break
+    if not _loaded:
+        df = _load_split("training_data.csv")
+        user_ids = df["user_id"].unique()
+        rng = np.random.RandomState(42)
+        rng.shuffle(user_ids)
+        split = int(0.7 * len(user_ids))
+        train_df = df[df["user_id"].isin(set(user_ids[:split]))].copy()
+        test_df  = df[df["user_id"].isin(set(user_ids[split:]))].copy()
+        print(f"Loaded training_data.csv, per-user 70/30 split")
 
 print(f"Train: {len(train_df):,} sets from {train_df['user_id'].nunique()} users")
 print(f"Test:  {len(test_df):,} sets from {test_df['user_id'].nunique()} users")
+
+# ── Per-exercise weight normalization (p5/p95 from train only) ────────────────
+# Replaces global WEIGHT_SCALE=200. Makes weight=0.5 mean "median for this exercise"
+# so bench 80kg and dips 80kg are no longer the same number.
+_stats = train_df.groupby("exercise")["weight_kg"].quantile([0.05, 0.95]).unstack()
+WEIGHT_P5  = np.full(NUM_EXERCISES, 0.0,   dtype=np.float32)
+WEIGHT_P95 = np.full(NUM_EXERCISES, 200.0, dtype=np.float32)
+for _ex, _row in _stats.iterrows():
+    if _ex in EXERCISE_TO_IDX:
+        _ei = EXERCISE_TO_IDX[_ex]
+        _p5, _p95 = float(_row[0.05]), float(_row[0.95])
+        if _p95 > _p5 + 1.0:  # skip degenerate ranges
+            WEIGHT_P5[_ei]  = _p5
+            WEIGHT_P95[_ei] = _p95
+
+def normalize_weight(weight_kg_arr, exercise_idx_arr):
+    """Normalize weight per-exercise to [0, 1] using p5/p95 from training data."""
+    p5  = WEIGHT_P5[exercise_idx_arr]
+    p95 = WEIGHT_P95[exercise_idx_arr]
+    return np.clip((weight_kg_arr - p5) / (p95 - p5), 0.0, 1.0).astype(np.float32)
+
+print("Weight ranges computed (per-exercise p5/p95)")
 
 # ═══════════════════════════════════════════════════════════════════
 # DATASET & DATALOADER
@@ -210,7 +245,7 @@ def build_user_sequences(user_df):
         seq = {
             "user_id": uid,
             "exercise_idx": torch.tensor(grp["exercise_idx"].values, dtype=torch.long),
-            "weight": torch.tensor(grp["weight_kg"].values / WEIGHT_SCALE, dtype=torch.float32),
+            "weight": torch.tensor(normalize_weight(grp["weight_kg"].values, grp["exercise_idx"].values), dtype=torch.float32),
             "reps": torch.tensor(grp["reps"].values / REPS_SCALE, dtype=torch.float32),
             "rir": torch.tensor(grp["rir"].values / RIR_SCALE, dtype=torch.float32),
             "delta_t": torch.tensor(
@@ -459,6 +494,41 @@ class DeepGainModel(nn.Module):
 
         return penalty / max(n_pairs, 1)
 
+    def minimum_drop_penalty(self, min_fraction: float = 0.15):
+        """Penalize f when involved muscles have near-zero drops (muscle collapse).
+
+        For each exercise, each muscle with non-zero involvement should produce
+        a drop of at least min_fraction * involvement from f_net.
+        Probes at the same reference point as fatigue_ordering_penalty.
+
+        min_fraction=0.15 means: a muscle with involvement=0.6 should drop ≥ 0.09.
+        """
+        device = self.involvement.device
+        penalty = torch.tensor(0.0, device=device)
+        n_muscles = 0
+
+        w   = torch.tensor([0.5],  dtype=torch.float32, device=device)
+        r   = torch.tensor([0.27], dtype=torch.float32, device=device)
+        rir = torch.tensor([0.4],  dtype=torch.float32, device=device)
+        mpc = torch.tensor([1.0],  dtype=torch.float32, device=device)
+
+        for ei in range(len(ALL_EXERCISES)):
+            inv = self.involvement[ei]  # (M,)
+            involved = (inv > 0).nonzero(as_tuple=True)[0]
+            if len(involved) == 0:
+                continue
+
+            e_embed = self.exercise_embed(torch.tensor([ei], device=device))
+
+            for mi in involved:
+                m_embed = self.muscle_embed(mi.unsqueeze(0))
+                drop = self.f_net(w, r, rir, mpc, e_embed, m_embed)
+                min_expected = min_fraction * inv[mi]
+                penalty = penalty + torch.relu(min_expected - drop)
+                n_muscles += 1
+
+        return penalty / max(n_muscles, 1)
+
     def forward(self, exercise_idx, weight, reps, rir_target, delta_t, mask):
         B, T = exercise_idx.shape
         M = self.num_muscles
@@ -596,6 +666,7 @@ for epoch in range(EPOCHS):
                             batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
         loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
         loss = loss + 0.05 * model.fatigue_ordering_penalty()
+        loss = loss + 0.10 * model.minimum_drop_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -639,19 +710,28 @@ for epoch in range(EPOCHS):
 
     with torch.no_grad():
         ord_penalty = model.fatigue_ordering_penalty().item()
+        min_penalty = model.minimum_drop_penalty().item()
 
     print(f"Epoch {epoch+1:3d}/{EPOCHS} | "
           f"Train RMSE: {train_rmse:.2f} RIR | Val RMSE: {val_rmse:.2f} RIR | "
-          f"ord_pen: {ord_penalty:.4f} | {elapsed:.0f}s", flush=True)
+          f"ord_pen: {ord_penalty:.4f} | min_pen: {min_penalty:.4f} | {elapsed:.0f}s", flush=True)
     print(recovery_str, flush=True)
     print(tau_all_str, flush=True)
 
     if val_loss < best_val_loss:
         best_val_loss = val_loss
-        torch.save(model.state_dict(), "deepgain_model_best.pt")
+        torch.save({
+            "model_state_dict": model.state_dict(),
+            "weight_p5":  WEIGHT_P5,
+            "weight_p95": WEIGHT_P95,
+        }, "deepgain_model_best.pt")
 
 # Save final model
-torch.save(model.state_dict(), "deepgain_model_muscle_ord.pt")
+torch.save({
+    "model_state_dict": model.state_dict(),
+    "weight_p5":  WEIGHT_P5,
+    "weight_p95": WEIGHT_P95,
+}, "deepgain_model_muscle_ord.pt")
 print(f"\nModel saved to deepgain_model_muscle_ord.pt")
 print(f"Best val model saved to deepgain_model_best.pt (RMSE {np.sqrt(best_val_loss) * RIR_SCALE:.4f})")
 
@@ -702,7 +782,7 @@ print(f"\nOrdering accuracy per exercise (% pairs where primary muscle drops mor
 model.eval()
 ordering_results = {}
 with torch.no_grad():
-    w   = torch.tensor([0.4],  dtype=torch.float32, device=DEVICE)
+    w   = torch.tensor([0.5],  dtype=torch.float32, device=DEVICE)
     r   = torch.tensor([0.27], dtype=torch.float32, device=DEVICE)
     rir = torch.tensor([0.4],  dtype=torch.float32, device=DEVICE)
     mpc = torch.tensor([1.0],  dtype=torch.float32, device=DEVICE)
@@ -899,45 +979,80 @@ plt.savefig(f"{CHART_DIR}/chart_recovery_curves.png", dpi=150)
 print("Saved chart_recovery_curves.png")
 
 # --- Chart 5: Fatigue Heatmaps ---
-probe_exercises = ["bench_press", "squat", "deadlift"]
-weight_range = np.linspace(0.1, 1.0, 30)
-reps_range = np.linspace(0.03, 0.5, 30)
+_heatmap_exercises = ["bench_press", "squat", "deadlift", "ohp", "pendlay_row", "dips"]
+_heatmap_exercises = [e for e in _heatmap_exercises if e in EXERCISE_TO_IDX]
+_ncols = 3
+_nrows = math.ceil(len(_heatmap_exercises) / _ncols)
 
-fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+# Per-exercise reps p5/p95 from training data
+_reps_stats = train_df.groupby("exercise")["reps"].quantile([0.05, 0.95]).unstack()
+_REPS_P5  = {ex: max(1.0,  float(_reps_stats.loc[ex, 0.05])) for ex in _heatmap_exercises if ex in _reps_stats.index}
+_REPS_P95 = {ex: min(30.0, float(_reps_stats.loc[ex, 0.95])) for ex in _heatmap_exercises if ex in _reps_stats.index}
+
+_HM_N = 30
+fig, axes = plt.subplots(_nrows, _ncols, figsize=(18, 5 * _nrows))
+_axes_flat = np.array(axes).reshape(-1)
 
 with torch.no_grad():
-    for col, ex_name in enumerate(probe_exercises):
+    for idx, ex_name in enumerate(_heatmap_exercises):
+        ax = _axes_flat[idx]
         ei = EXERCISE_TO_IDX[ex_name]
         muscles = EXERCISE_MUSCLES[ex_name]
         primary_muscle = max(muscles, key=muscles.get)
         mi = MUSCLE_TO_IDX[primary_muscle]
 
+        w_p5_kg  = float(WEIGHT_P5[ei])
+        w_p95_kg = float(WEIGHT_P95[ei])
+        r_p5     = _REPS_P5.get(ex_name, 1.0)
+        r_p95    = _REPS_P95.get(ex_name, 15.0)
+
+        weight_kg_arr = np.linspace(w_p5_kg, w_p95_kg, _HM_N)
+        reps_arr      = np.linspace(r_p5, r_p95, _HM_N)
+
         e_embed = model.exercise_embed(torch.tensor([ei], device=DEVICE))
         m_embed = model.muscle_embed(torch.tensor([mi], device=DEVICE))
 
-        drop_grid = np.zeros((len(reps_range), len(weight_range)))
-
-        for ri, r_val in enumerate(reps_range):
-            for wi, w_val in enumerate(weight_range):
-                w_t = torch.tensor([w_val], dtype=torch.float32, device=DEVICE)
-                r_t = torch.tensor([r_val], dtype=torch.float32, device=DEVICE)
-                rir_t = torch.tensor([0.4], dtype=torch.float32, device=DEVICE)  # RIR 2
-                mpc_t = torch.tensor([1.0], dtype=torch.float32, device=DEVICE)
-
+        drop_grid = np.zeros((_HM_N, _HM_N))
+        w_range = max(w_p95_kg - w_p5_kg, 1.0)
+        for ri, r_val in enumerate(reps_arr):
+            r_norm = r_val / REPS_SCALE
+            for wi, w_kg in enumerate(weight_kg_arr):
+                w_norm = float(np.clip((w_kg - w_p5_kg) / w_range, 0.0, 1.0))
+                w_t   = torch.tensor([w_norm], dtype=torch.float32, device=DEVICE)
+                r_t   = torch.tensor([r_norm], dtype=torch.float32, device=DEVICE)
+                rir_t = torch.tensor([0.4],    dtype=torch.float32, device=DEVICE)
+                mpc_t = torch.tensor([1.0],    dtype=torch.float32, device=DEVICE)
                 d = model.f_net(w_t, r_t, rir_t, mpc_t, e_embed, m_embed).item()
                 drop_grid[ri, wi] = d * muscles[primary_muscle]
 
-        ax = axes[col]
         im = ax.imshow(drop_grid, aspect="auto", origin="lower",
-                       extent=[20, 200, 1, 15], cmap="YlOrRd", vmin=0)
+                       extent=[w_p5_kg, w_p95_kg, r_p5, r_p95],
+                       cmap="YlOrRd", vmin=0)
         ax.set_xlabel("Weight (kg)")
         ax.set_ylabel("Reps")
-        ax.set_title(f"MPC Drop: {ex_name.replace('_', ' ')}\n(primary: {primary_muscle})")
+        ax.set_title(f"{ex_name.replace('_', ' ').title()}\n(primary: {primary_muscle})")
         plt.colorbar(im, ax=ax, label="MPC drop")
 
-plt.suptitle("Fatigue Response (f) at RIR 2, MPC=1.0", fontsize=14, y=1.02)
+        # Grey mask where no training data exists (off-manifold)
+        ex_train = train_df[train_df["exercise"] == ex_name]
+        if len(ex_train) > 0:
+            hist, _, _ = np.histogram2d(
+                ex_train["weight_kg"].values, ex_train["reps"].values,
+                bins=[_HM_N, _HM_N],
+                range=[[w_p5_kg, w_p95_kg], [r_p5, r_p95]],
+            )
+            no_data = (hist.T == 0).astype(float)
+            ax.imshow(no_data, aspect="auto", origin="lower",
+                      extent=[w_p5_kg, w_p95_kg, r_p5, r_p95],
+                      cmap="Greys", alpha=0.45, vmin=0, vmax=1)
+
+for idx in range(len(_heatmap_exercises), len(_axes_flat)):
+    _axes_flat[idx].set_visible(False)
+
+plt.suptitle("Learned Fatigue (f) — Per-Muscle Breakdown\n(per-exercise weight/reps range; grey = no training data)",
+             fontsize=13)
 plt.tight_layout()
-plt.savefig(f"{CHART_DIR}/chart_fatigue_heatmaps.png", dpi=150)
+plt.savefig(f"{CHART_DIR}/chart_fatigue_heatmaps.png", dpi=150, bbox_inches="tight")
 print("Saved chart_fatigue_heatmaps.png")
 
 # ── Chart 6: Cross-exercise fatigue transfer matrix ──────────────────────────

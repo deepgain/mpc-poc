@@ -114,17 +114,24 @@ LOAD-VELOCITY:
 from __future__ import annotations
 
 import argparse
-import itertools
+import hashlib
 import math
 import os
+import pathlib
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import yaml
+
+try:
+    import yaml as _yaml
+    _YAML_AVAILABLE = True
+except ImportError:
+    _YAML_AVAILABLE = False
+    print("WARNING: PyYAML not installed — run: pip install pyyaml")
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
@@ -139,13 +146,18 @@ _RM_SD   = np.array([0.0,  1.0,  1.5,  2.2,  2.8,  3.5,  4.1,  4.8,  5.4,  6.0, 
 # Exercise-specific RM multipliers at 60% 1RM [2]
 EXERCISE_RM_MULT_60 = {
     "bench_press": 0.73, "incline_bench": 0.70, "close_grip_bench": 0.70,
-    "dumbbell_bench": 0.72, "ohp": 0.68, "dumbbell_ohp": 0.65, "dips": 0.72,
-    "barbell_row": 0.73, "lat_pulldown": 0.68, "cable_row": 0.70, "pull_up": 0.70,
-    "squat": 1.00, "front_squat": 0.95, "deadlift": 0.85, "rdl": 0.78,
-    "leg_press": 1.10, "bulgarian_split_squat": 0.90, "hip_thrust": 0.95,
-    "tricep_pushdown": 0.63, "overhead_tricep_ext": 0.60, "bicep_curl": 0.63,
-    "hammer_curl": 0.65, "lateral_raise": 0.55, "face_pull": 0.55,
-    "leg_curl": 0.65, "leg_extension": 0.68, "calf_raise": 0.70,
+    "spoto_press": 0.71, "incline_bench_45": 0.68, "decline_bench": 0.74,
+    "chest_press_machine": 0.76, "ohp": 0.68, "dips": 0.72,
+    "dumbbell_flyes": 0.66, "skull_crusher": 0.60,
+    "pendlay_row": 0.73, "seal_row": 0.70,
+    "lat_pulldown": 0.68, "pull_up": 0.70, "reverse_fly": 0.55,
+    "squat": 1.00, "low_bar_squat": 1.00, "high_bar_squat": 0.96,
+    "deadlift": 0.85, "sumo_deadlift": 0.87, "rdl": 0.78,
+    "leg_press": 1.10, "bulgarian_split_squat": 0.90,
+    "leg_curl": 0.65, "leg_extension": 0.68,
+    "plank": 0.62, "farmers_walk": 0.70, "leg_raises": 0.64,
+    "ab_wheel": 0.62, "dead_bug": 0.60, "trx_bodysaw": 0.61,
+    "suitcase_carry": 0.66, "bird_dog": 0.60,
 }
 
 
@@ -227,29 +239,6 @@ def set_n_retention(set_number: int, s2_s1: float) -> float:
         return min(0.98, s2_s1 + 0.25)
 
 
-@dataclass
-class GeneratorConfig:
-    """Configurable knobs for data realism and coverage control."""
-    pair_block_rate: float = 0.12
-    cross_overlap_base: float = 0.28
-    session_penalty_per_exercise: float = 0.04
-    max_session_penalty: float = 0.20
-    rir_noise_scale: float = 1.0
-    floor_fraction_per_exercise: float = 0.02
-    floor_min_rows: int = 300
-
-
-GEN_CONFIG = GeneratorConfig()
-
-
-def set_generator_config(**kwargs):
-    """Update generator config in place while preserving defaults."""
-    for k, v in kwargs.items():
-        if not hasattr(GEN_CONFIG, k):
-            raise ValueError(f"Unknown GeneratorConfig field: {k}")
-        setattr(GEN_CONFIG, k, v)
-
-
 def compute_max_reps_set_n(set1_max_reps: float, set_number: int,
                            rest_minutes: float, exercise_category: str,
                            target_rir: int, pct_1rm: float = 0.78) -> float:
@@ -276,87 +265,225 @@ def compute_max_reps_set_n(set1_max_reps: float, set_number: int,
 # ║  [25]-[31] Simão, Senna, Spreuwenberg, Sforzo, Arazi                  ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
-ALL_MUSCLES = [
-    "chest", "anterior_delts", "lateral_delts", "rear_delts",
-    "rhomboids", "triceps", "biceps",
-    "lats", "quads", "hamstrings", "glutes", "adductors", "erectors", "calves",
-    "abs",
-]
+EXERCISE_MUSCLES: Dict[str, Dict[str, float]] = {
+    # Fallback map (used only when YAML is unavailable).
+    # Keep IDs aligned with exercise_muscle_order.yaml.
+    "bench_press":      {"chest": 1.00, "triceps": 0.654499, "anterior_delts": 0.203639, "lateral_delts": 0.047579, "rear_delts": 0.033305},
+    "incline_bench":    {"chest": 0.70, "anterior_delts": 0.75, "triceps": 0.50},
+    "close_grip_bench": {"chest": 0.65, "triceps": 0.75, "anterior_delts": 0.55},
+    "spoto_press":      {"chest": 0.75, "triceps": 0.70, "anterior_delts": 0.45},
+    "incline_bench_45": {"chest": 0.72, "triceps": 0.68, "anterior_delts": 0.55},
+    "decline_bench":    {"chest": 0.78, "triceps": 0.72, "anterior_delts": 0.40},
+    "chest_press_machine": {"chest": 0.72, "anterior_delts": 0.45, "triceps": 0.30},
+    "dips":             {"chest": 1.00, "triceps": 0.876653, "anterior_delts": 0.716490, "lateral_delts": 0.275573, "abs": 0.407848},
+    "ohp":              {"anterior_delts": 0.85, "triceps": 0.65, "lateral_delts": 0.45},
+    "dumbbell_flyes":   {"chest": 0.82, "anterior_delts": 0.30},
+    "skull_crusher":    {"triceps": 0.85, "anterior_delts": 0.25},
+    "squat":            {"quads": 1.00, "hamstrings": 0.471318, "glutes": 0.420000, "erectors": 0.567194},
+    "low_bar_squat":    {"adductors": 1.00, "calves": 0.729805, "erectors": 0.583398, "glutes": 0.232033},
+    "high_bar_squat":   {"quads": 0.82, "glutes": 0.62, "erectors": 0.40},
+    "deadlift":         {"hamstrings": 1.00, "erectors": 0.834134, "glutes": 0.821333, "quads": 0.600000},
+    "sumo_deadlift":    {"quads": 1.00, "abs": 0.894167, "calves": 0.708333, "hamstrings": 0.604167, "glutes": 0.539583, "adductors": 0.479167, "erectors": 0.453334},
+    "rdl":              {"hamstrings": 0.85, "glutes": 0.62, "erectors": 0.50},
+    "bulgarian_split_squat": {"quads": 1.00, "glutes": 0.537209, "erectors": 0.425312, "hamstrings": 0.194614},
+    "leg_press":        {"quads": 0.82, "glutes": 0.52, "hamstrings": 0.28},
+    "leg_curl":         {"hamstrings": 0.85},
+    "leg_extension":    {"quads": 0.85},
+    "pendlay_row":      {"rear_delts": 1.00, "rhomboids": 0.640147, "erectors": 0.588446, "lats": 0.529988},
+    "pull_up":          {"lats": 0.82, "rear_delts": 0.72, "rhomboids": 0.52, "biceps": 0.45},
+    "lat_pulldown":     {"lats": 0.78, "rhomboids": 0.52, "rear_delts": 0.40, "biceps": 0.35},
+    "reverse_fly":      {"rear_delts": 0.88, "lateral_delts": 0.65},
+    "seal_row":         {"rear_delts": 1.00, "rhomboids": 0.713324, "lats": 0.399731, "erectors": 0.216904},
+    "plank":            {"abs": 1.00},
+    "farmers_walk":     {"erectors": 1.00, "abs": 0.828656},
+    "leg_raises":       {"abs": 1.00, "lats": 0.184276, "quads": 0.131625, "erectors": 0.041769},
+    "ab_wheel":         {"abs": 1.00},
+    "dead_bug":         {"abs": 1.00},
+    "trx_bodysaw":      {"abs": 1.00, "erectors": 0.021685},
+    "suitcase_carry":   {"abs": 1.00, "erectors": 0.887049},
+    "bird_dog":         {"glutes": 1.00, "erectors": 0.893714},
+}
+
+ALL_EXERCISES = list(EXERCISE_MUSCLES.keys())
+ALL_MUSCLES = sorted(set(m for ex in EXERCISE_MUSCLES.values() for m in ex))
 
 
-def _load_scaled_weights(csv_path: str = "exercise_muscle_weights_scaled.csv") -> Dict[str, Dict[str, float]]:
-    """Load exercise->muscle coefficients from transformed EMG CSV (same source as train.py)."""
-    if not os.path.exists(csv_path):
-        raise RuntimeError(f"Missing required file: {csv_path}")
+def _refresh_exercise_globals() -> None:
+    """Refresh cached exercise/muscle lists after registry updates."""
+    global ALL_EXERCISES, ALL_MUSCLES
+    ALL_EXERCISES = sorted(EXERCISE_MUSCLES.keys())
+    ALL_MUSCLES = sorted(set(m for ex in EXERCISE_MUSCLES.values() for m in ex))
 
-    df = pd.read_csv(csv_path)
-    missing = [m for m in ALL_MUSCLES if m not in df.columns]
-    if missing:
-        raise RuntimeError(f"{csv_path} missing muscle columns: {missing}")
 
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ORDINAL MUSCLE INVOLVEMENT — Milestone 2                              ║
+# ║  Loaded from exercise_muscle_order.yaml + transformed EMG CSV.         ║
+# ║  Real transformed weights are the only source of numeric overlap.      ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+# Per-set MPC drop ranges sampled uniformly [Milestone 2 spec]
+FATIGUE_DROP_RANGES: Dict[str, Tuple[float, float]] = {
+    "primary":   (0.70, 1.00),
+    "secondary": (0.30, 0.60),
+    "tertiary":  (0.05, 0.20),
+}
+
+# Populated by load_exercise_yaml(); maps exercise → {muscle → tier str}
+ORDINAL_MUSCLES: Dict[str, Dict[str, str]] = {}
+MUSCLE_RECOVERY_REGION: Dict[str, str] = {
+    "chest": "upper",
+    "lats": "upper",
+    "rear_delts": "upper",
+    "anterior_delts": "upper",
+    "lateral_delts": "upper",
+    "biceps": "upper",
+    "triceps": "upper",
+    "forearms": "upper",
+    "quads": "lower",
+    "hamstrings": "lower",
+    "glutes": "lower",
+    "calves": "lower",
+    "abs": "lower",
+    "erectors": "lower",
+    "adductors": "lower",
+}
+
+_DEFAULT_YAML_PATH = pathlib.Path(__file__).parent / "exercise_muscle_order.yaml"
+_DEFAULT_SCALED_WEIGHTS_PATH = pathlib.Path(__file__).parent / "exercise_muscle_weights_scaled.csv"
+
+
+def _load_scaled_weights(path: Optional[str] = None) -> Dict[str, Dict[str, float]]:
+    """Load transformed EMG weights from CSV.
+
+    This is the canonical numeric source for overlap / recovery logic.
+    We intentionally avoid any tier-to-number fallback here so generator
+    behavior cannot silently drift back to ordinal proxy weights.
+    """
+    p = pathlib.Path(path) if path else _DEFAULT_SCALED_WEIGHTS_PATH
+    if not p.exists():
+        raise FileNotFoundError(f"Missing required transformed weights CSV: {p}")
+
+    df = pd.read_csv(p)
+    if "exercise_id" not in df.columns:
+        raise RuntimeError(f"Invalid transformed weights CSV: missing exercise_id in {p}")
+
+    ignored_cols = {"exercise_id", "csv_title", "source", "per_exercise_max_after_clip", "global_clip_p99"}
+    muscle_cols = [c for c in df.columns if c not in ignored_cols and c not in {"upper_traps", "brachialis"}]
     weights: Dict[str, Dict[str, float]] = {}
+
     for _, row in df.iterrows():
         ex_id = str(row["exercise_id"])
         ex_weights = {
             m: float(np.clip(row[m], 0.0, 1.0))
-            for m in ALL_MUSCLES
+            for m in muscle_cols
             if float(row[m]) > 0.0
         }
         if ex_weights:
             weights[ex_id] = ex_weights
+
     return weights
 
 
-def _load_exercise_data(yaml_path: str = "exercise_muscle_order.yaml"):
-    """Load canonical exercise list/order from YAML and coefficients from transformed CSV.
+def load_exercise_yaml(path: Optional[str] = None) -> None:
+    """Load exercise_muscle_order.yaml and populate ORDINAL_MUSCLES.
 
-    This keeps generator identical to train.py regarding:
-    - exercise IDs,
-    - involved muscles,
-    - numeric involvement coefficients.
+    Numeric exercise weights come strictly from exercise_muscle_weights_scaled.csv.
+    YAML remains the canonical exercise registry and ordinal source.
     """
-    if not os.path.exists(yaml_path):
-        raise RuntimeError(f"Missing required file: {yaml_path}")
+    global ORDINAL_MUSCLES
+    if not _YAML_AVAILABLE:
+        return
+    p = pathlib.Path(path) if path else _DEFAULT_YAML_PATH
+    if not p.exists():
+        print(f"  WARNING: YAML not found at {p}. Using hardcoded EXERCISE_MUSCLES.")
+        return
 
-    with open(yaml_path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
-    if not data or "exercises" not in data:
-        raise RuntimeError(f"Invalid YAML structure in {yaml_path}: missing 'exercises'")
+    with p.open("r", encoding="utf-8") as fh:
+        data = _yaml.safe_load(fh)
 
+    exercises: Dict[str, Any] = data.get("exercises", {})
+    ORDINAL_MUSCLES = {}
     scaled_weights = _load_scaled_weights()
+    yaml_exercise_muscles: Dict[str, Dict[str, float]] = {}
 
-    exercise_muscles: Dict[str, Dict[str, float]] = {}
-    exercise_meta: Dict[str, Dict[str, object]] = {}
+    for ex_key, ex_data in exercises.items():
+        tier_map: Dict[str, str] = {}
+        for tier in ("primary", "secondary", "tertiary"):
+            for muscle in ex_data.get(f"{tier}_muscles", []):
+                tier_map[muscle] = tier
+        ORDINAL_MUSCLES[ex_key] = tier_map
 
-    for ex_id, ex_data in data["exercises"].items():
-        if not isinstance(ex_data, dict):
-            continue
+        if ex_key not in scaled_weights:
+            raise RuntimeError(
+                f"Missing transformed EMG weights for YAML exercise '{ex_key}'. "
+                f"Update exercise_muscle_weights_scaled.csv before generating data."
+            )
+        yaml_exercise_muscles[ex_key] = scaled_weights[ex_key]
 
-        ranked = (
-            ex_data.get("primary_muscles", [])
-            + ex_data.get("secondary_muscles", [])
-            + ex_data.get("tertiary_muscles", [])
-        )
-        ranked = [m for m in ranked if m in ALL_MUSCLES]
-        if not ranked:
-            continue
+    # Keep only YAML-defined exercises so data generation cannot drift.
+    EXERCISE_MUSCLES.clear()
+    EXERCISE_MUSCLES.update(yaml_exercise_muscles)
+    _refresh_exercise_globals()
 
-        exercise_meta[ex_id] = ex_data
+    print(
+        f"  Loaded ordinal muscles for {len(ORDINAL_MUSCLES)} exercises "
+        f"from {p.name} and numeric EMG weights from {_DEFAULT_SCALED_WEIGHTS_PATH.name}"
+    )
 
-        if ex_id in scaled_weights:
-            exercise_muscles[ex_id] = scaled_weights[ex_id]
+
+def fatigue_drop_for_muscle(exercise: str, muscle: str,
+                             rng: np.random.Generator) -> float:
+    """Sample a per-set MPC drop for (exercise, muscle) from its ordinal tier.
+
+    Returns a float in [0.05, 1.0].  Falls back to secondary range when the
+    (exercise, muscle) pair is not defined in ORDINAL_MUSCLES.
+
+    Usage by train.py (Osoba B):
+        drop = fatigue_drop_for_muscle("bench_press", "chest", rng)
+        # drop ~ U[0.70, 1.00]
+    """
+    tier = ORDINAL_MUSCLES.get(exercise, {}).get(muscle)
+    if tier is None:
+        # Derive tier from position in EXERCISE_MUSCLES (legacy exercises)
+        muscles_dict = EXERCISE_MUSCLES.get(exercise, {})
+        if muscles_dict:
+            ranked = sorted(muscles_dict, key=muscles_dict.get, reverse=True)
+            idx = ranked.index(muscle) if muscle in ranked else len(ranked)
+            tier = "primary" if idx == 0 else "secondary" if idx < 3 else "tertiary"
         else:
-            # Keep fallback identical to train.py for consistency.
-            exercise_muscles[ex_id] = {
-                m: max(1.0 - 0.15 * r, 0.3)
-                for r, m in enumerate(ranked)
-            }
-
-    return exercise_muscles, exercise_meta
+            tier = "secondary"
+    lo, hi = FATIGUE_DROP_RANGES[tier]
+    return float(rng.uniform(lo, hi))
 
 
-EXERCISE_MUSCLES, EXERCISE_META = _load_exercise_data()
-ALL_EXERCISES = list(EXERCISE_MUSCLES.keys())
+def ordinal_set_capacity_multiplier(exercise: str, set_idx: int,
+                                    rng: np.random.Generator) -> float:
+    """Map ordinal per-muscle drop sampling to a bounded set capacity multiplier.
+
+    We intentionally keep the effect moderate, because set-to-set retention,
+    inter-session recovery and cross-exercise transfer already model fatigue.
+    Numeric weighting by transformed EMG involvement keeps the ordinal sampler
+    aligned with the same primary/secondary emphasis used elsewhere.
+    """
+    muscles = list(EXERCISE_MUSCLES.get(exercise, {}).keys())
+    if not muscles:
+        return 1.0
+
+    weights = EXERCISE_MUSCLES.get(exercise, {})
+    total_weight = sum(max(weights.get(m, 0.0), 0.0) for m in muscles) or 1.0
+    normalized = {m: max(weights.get(m, 0.0), 0.0) / total_weight for m in muscles}
+    sampled = {m: fatigue_drop_for_muscle(exercise, m, rng) for m in muscles}
+
+    # Literature supports larger fatigue in more involved muscles, but not an
+    # exact closed-form aggregator at exercise level, so we use a conservative
+    # weighted mean + weighted-peak blend instead of equal-weight averaging.
+    weighted_mean = sum(normalized[m] * sampled[m] for m in muscles)
+    weighted_peak = max(sampled[m] * (0.65 + 0.35 * normalized[m]) for m in muscles)
+    mean_drop = float(0.72 * weighted_mean + 0.28 * weighted_peak)
+
+    # Increase the impact gradually with set number (first set least affected).
+    set_scale = 0.05 + 0.025 * max(0, set_idx - 1)
+    return float(np.clip(1.0 - set_scale * mean_drop, 0.82, 1.0))
 
 
 def muscle_overlap(ex_a: str, ex_b: str) -> float:
@@ -386,21 +513,25 @@ def cross_exercise_penalty(prior_exercises: List[Tuple[str, int, int, float]],
     penalty = 0.0
 
     # Cross-exercise transfer from muscle overlap [25][26][29]
-    for prior_ex, sets, avg_reps, avg_rir in prior_exercises:
+    # Nearby prior exercises should affect current performance more strongly
+    # than movements performed much earlier in the session.
+    for prior_idx, (prior_ex, sets, avg_reps, avg_rir) in enumerate(prior_exercises):
         overlap = muscle_overlap(prior_ex, current_exercise)
         if overlap < 0.05:
             continue
-        base_penalty = overlap * GEN_CONFIG.cross_overlap_base  # [25] ~28% at full overlap
+        base_penalty = overlap * 0.28  # [25] ~28% at full overlap
         volume_scale = min(1.5, sets / 3.0)
         proximity_scale = 1.0 / (1.0 + 0.12 * avg_rir)
-        penalty += base_penalty * volume_scale * proximity_scale
+        distance = max(1, exercise_position - prior_idx)
+        recency_scale = 0.82 ** (distance - 1)
+        penalty += base_penalty * volume_scale * proximity_scale * recency_scale
 
     # Session-level accumulated fatigue [27]
     # Spreuwenberg: -32.5% after full-body session
     # Model: -4% per exercise beyond the 3rd, cap at -20%
     if exercise_position >= 3:
-        session_penalty = GEN_CONFIG.session_penalty_per_exercise * (exercise_position - 2)
-        penalty += min(GEN_CONFIG.max_session_penalty, session_penalty)
+        session_penalty = 0.04 * (exercise_position - 2)
+        penalty += min(0.20, session_penalty)
 
     effective_multiplier = 1.0 - min(0.45, penalty)  # cap total at 45%
     return max(0.55, effective_multiplier)
@@ -479,7 +610,7 @@ def rir_noise(actual_rir: float, total_reps_in_set: int,
         base_sd = 0.8 + 0.20 * (total_reps_in_set - 12)  # [14][16]
 
     distance_amplifier = 1.0 + 0.15 * max(0, actual_rir - 1)  # [16][20]
-    sd = base_sd * distance_amplifier * GEN_CONFIG.rir_noise_scale
+    sd = base_sd * distance_amplifier
 
     noise = population_bias + user_bias + rng.normal(0, sd)
     reported = actual_rir + noise
@@ -514,45 +645,40 @@ class ExerciseInfo:
     min_weight_kg: float
 
 EXERCISE_INFO: Dict[str, ExerciseInfo] = {
-    # Upper body compounds/accessories
-    "bench_press": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
+    "bench_press":      ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
+    "incline_bench":    ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
     "close_grip_bench": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
-    "spoto_press": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
-    "incline_bench": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
+    "spoto_press":      ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
     "incline_bench_45": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
-    "decline_bench": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
+    "decline_bench":    ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
     "chest_press_machine": ExerciseInfo("upper_compound", "upper", "machine", 5.0, 20),
-    "dips": ExerciseInfo("upper_compound", "upper", "bodyweight", 2.5, 0),
-    "ohp": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 15),
-    "dumbbell_flyes": ExerciseInfo("isolation", "upper", "dumbbell", 2.0, 5),
-    "skull_crusher": ExerciseInfo("isolation", "upper", "barbell", 2.5, 5),
-    "pendlay_row": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
-    "pull_up": ExerciseInfo("upper_compound", "upper", "bodyweight", 2.5, 0),
-    "lat_pulldown": ExerciseInfo("upper_compound", "upper", "cable", 5.0, 20),
-    "reverse_fly": ExerciseInfo("isolation", "upper", "machine", 2.5, 5),
-    "seal_row": ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
-
-    # Lower body compounds/accessories
-    "squat": ExerciseInfo("lower_compound", "lower", "barbell", 2.5, 20),
-    "low_bar_squat": ExerciseInfo("lower_compound", "lower", "barbell", 2.5, 20),
-    "high_bar_squat": ExerciseInfo("lower_compound", "lower", "barbell", 2.5, 20),
-    "deadlift": ExerciseInfo("lower_compound", "deadlift", "barbell", 2.5, 40),
-    "sumo_deadlift": ExerciseInfo("lower_compound", "deadlift", "barbell", 2.5, 35),
-    "rdl": ExerciseInfo("lower_compound", "lower", "barbell", 2.5, 30),
-    "leg_press": ExerciseInfo("lower_compound", "lower", "machine", 5.0, 40),
+    "ohp":              ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 15),
+    "dips":             ExerciseInfo("upper_compound", "upper", "bodyweight", 2.5, 0),
+    "dumbbell_flyes":   ExerciseInfo("isolation", "upper", "dumbbell", 2.0, 4),
+    "pendlay_row":      ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
+    "seal_row":         ExerciseInfo("upper_compound", "upper", "barbell", 2.5, 20),
+    "lat_pulldown":     ExerciseInfo("upper_compound", "upper", "cable", 5.0, 20),
+    "pull_up":          ExerciseInfo("upper_compound", "upper", "bodyweight", 2.5, 0),
+    "squat":            ExerciseInfo("lower_compound", "lower", "barbell", 2.5, 20),
+    "low_bar_squat":    ExerciseInfo("lower_compound", "lower", "barbell", 2.5, 20),
+    "high_bar_squat":   ExerciseInfo("lower_compound", "lower", "barbell", 2.5, 20),
+    "deadlift":         ExerciseInfo("lower_compound", "deadlift", "barbell", 2.5, 40),
+    "sumo_deadlift":    ExerciseInfo("lower_compound", "deadlift", "barbell", 2.5, 40),
+    "rdl":              ExerciseInfo("lower_compound", "lower", "barbell", 2.5, 30),
+    "leg_press":        ExerciseInfo("lower_compound", "lower", "machine", 5.0, 40),
     "bulgarian_split_squat": ExerciseInfo("lower_compound", "lower", "dumbbell", 2.0, 0),
-    "leg_curl": ExerciseInfo("isolation", "lower", "machine", 2.5, 10),
-    "leg_extension": ExerciseInfo("isolation", "lower", "machine", 2.5, 10),
-
-    # Core / stability
-    "plank": ExerciseInfo("isolation", "upper", "bodyweight", 2.5, 0),
-    "farmers_walk": ExerciseInfo("isolation", "upper", "dumbbell", 2.5, 10),
-    "leg_raises": ExerciseInfo("isolation", "upper", "bodyweight", 2.5, 0),
-    "ab_wheel": ExerciseInfo("isolation", "upper", "bodyweight", 2.5, 0),
-    "dead_bug": ExerciseInfo("isolation", "upper", "bodyweight", 2.5, 0),
-    "trx_bodysaw": ExerciseInfo("isolation", "upper", "bodyweight", 2.5, 0),
-    "suitcase_carry": ExerciseInfo("isolation", "upper", "dumbbell", 2.5, 8),
-    "bird_dog": ExerciseInfo("isolation", "upper", "bodyweight", 2.5, 0),
+    "skull_crusher":    ExerciseInfo("isolation", "upper", "barbell", 2.5, 10),
+    "reverse_fly":      ExerciseInfo("isolation", "upper", "machine", 2.5, 5),
+    "leg_curl":         ExerciseInfo("isolation", "lower", "machine", 2.5, 10),
+    "leg_extension":    ExerciseInfo("isolation", "lower", "machine", 2.5, 10),
+    "plank":            ExerciseInfo("isolation", "lower", "bodyweight", 2.5, 0),
+    "farmers_walk":     ExerciseInfo("isolation", "lower", "dumbbell", 2.5, 0),
+    "leg_raises":       ExerciseInfo("isolation", "lower", "bodyweight", 2.5, 0),
+    "ab_wheel":         ExerciseInfo("isolation", "lower", "bodyweight", 2.5, 0),
+    "dead_bug":         ExerciseInfo("isolation", "lower", "bodyweight", 2.5, 0),
+    "trx_bodysaw":      ExerciseInfo("isolation", "lower", "bodyweight", 2.5, 0),
+    "suitcase_carry":   ExerciseInfo("isolation", "lower", "dumbbell", 2.5, 0),
+    "bird_dog":         ExerciseInfo("isolation", "lower", "bodyweight", 2.5, 0),
 }
 
 
@@ -584,6 +710,10 @@ class UserProfile:
     consistency: float
     preferred_rest: float
     session_time_pref: str                                    # 'morning', 'evening', 'flexible'
+    split_preference: int
+    lift_focus: str
+    squat_style: str
+    deadlift_style: str
     excluded_exercises: List[str] = field(default_factory=list)
     program_switch_week: Optional[int] = None                 # week to switch programs
     stalling: bool = False                                    # no progression after week 30
@@ -616,54 +746,75 @@ def generate_user(rng: np.random.Generator, user_id: str) -> UserProfile:
         bench_mult = rng.uniform(*cfg["bench_bw"]) * 0.57   # [40][41]
         squat_mult = rng.uniform(*cfg["squat_bw"]) * 0.64
 
+    split_pref = int(rng.choice([3, 4, 5], p=[0.26, 0.54, 0.20]))
+    lift_focus = str(rng.choice(
+        ["balanced", "bench", "squat", "deadlift"],
+        p=[0.52, 0.22, 0.16, 0.10]
+    ))
+    squat_style = str(rng.choice(["low_bar", "high_bar"], p=[0.72, 0.28]))
+    deadlift_style = str(rng.choice(["conventional", "sumo"], p=[0.58, 0.42]))
+
     bench = bw * bench_mult
     squat = bw * squat_mult
     dl = squat * rng.uniform(1.05, 1.25)
 
+    if lift_focus == "bench":
+        bench *= rng.uniform(1.03, 1.09)
+    elif lift_focus == "squat":
+        squat *= rng.uniform(1.03, 1.08)
+    elif lift_focus == "deadlift":
+        dl *= rng.uniform(1.04, 1.10)
+
+    low_bar_mult = rng.uniform(0.98, 1.03) if squat_style == "low_bar" else rng.uniform(0.92, 0.98)
+    high_bar_mult = rng.uniform(0.92, 0.98) if squat_style == "low_bar" else rng.uniform(0.97, 1.01)
+    sumo_mult = rng.uniform(0.98, 1.05) if deadlift_style == "sumo" else rng.uniform(0.90, 0.99)
+
     e1rm = {
-        "bench_press": bench,
-        "close_grip_bench": bench * rng.uniform(0.82, 0.90),
+        "bench_press": bench, "incline_bench": bench * rng.uniform(0.78, 0.85),
+        "close_grip_bench": bench * rng.uniform(0.82, 0.88),
         "spoto_press": bench * rng.uniform(0.86, 0.94),
-        "incline_bench": bench * rng.uniform(0.78, 0.86),
-        "incline_bench_45": bench * rng.uniform(0.75, 0.83),
-        "decline_bench": bench * rng.uniform(0.88, 0.97),
-        "chest_press_machine": bench * rng.uniform(0.95, 1.20),
-        "dips": bench * rng.uniform(0.58, 0.75),
+        "incline_bench_45": bench * rng.uniform(0.74, 0.82),
+        "decline_bench": bench * rng.uniform(0.86, 0.94),
+        "chest_press_machine": bench * rng.uniform(0.78, 0.90),
         "ohp": bench * rng.uniform(0.57, 0.67),
-        "dumbbell_flyes": bench * rng.uniform(0.30, 0.45),
-        "skull_crusher": bench * rng.uniform(0.26, 0.40),
-        "pendlay_row": bench * rng.uniform(0.75, 0.92),
-        "pull_up": bench * rng.uniform(0.50, 0.68),
-        "lat_pulldown": bench * rng.uniform(0.62, 0.82),
-        "reverse_fly": bw * rng.uniform(0.12, 0.22),
-        "seal_row": bench * rng.uniform(0.65, 0.88),
+        "dips": bench * rng.uniform(0.55, 0.72),
+        "dumbbell_flyes": bench * rng.uniform(0.24, 0.34),
+        "pendlay_row": bench * rng.uniform(0.80, 0.98),
+        "seal_row": bench * rng.uniform(0.68, 0.85),
+        "lat_pulldown": bench * rng.uniform(0.60, 0.76),
+        "pull_up": bench * rng.uniform(0.48, 0.65),
         "squat": squat,
-        "low_bar_squat": squat * rng.uniform(0.95, 1.08),
-        "high_bar_squat": squat * rng.uniform(0.90, 1.00),
+        "low_bar_squat": squat * low_bar_mult,
+        "high_bar_squat": squat * high_bar_mult,
         "deadlift": dl,
-        "sumo_deadlift": dl * rng.uniform(0.92, 1.06),
+        "sumo_deadlift": dl * sumo_mult,
         "rdl": dl * rng.uniform(0.65, 0.75),
-        "leg_press": squat * rng.uniform(1.30, 1.65),
-        "bulgarian_split_squat": squat * rng.uniform(0.34, 0.50),
-        "leg_curl": squat * rng.uniform(0.28, 0.42),
-        "leg_extension": squat * rng.uniform(0.34, 0.52),
-        "plank": bw * rng.uniform(0.40, 0.70),
-        "farmers_walk": bw * rng.uniform(0.70, 1.30),
-        "leg_raises": bw * rng.uniform(0.30, 0.55),
-        "ab_wheel": bw * rng.uniform(0.35, 0.60),
-        "dead_bug": bw * rng.uniform(0.20, 0.45),
-        "trx_bodysaw": bw * rng.uniform(0.35, 0.60),
-        "suitcase_carry": bw * rng.uniform(0.45, 0.95),
-        "bird_dog": bw * rng.uniform(0.18, 0.35),
+        "leg_press": squat * rng.uniform(1.30, 1.60),
+        "bulgarian_split_squat": squat * rng.uniform(0.34, 0.46),
+        "skull_crusher": bench * rng.uniform(0.24, 0.35),
+        "reverse_fly": bw * rng.uniform(0.08, 0.16),
+        "leg_curl": squat * rng.uniform(0.28, 0.40),
+        "leg_extension": squat * rng.uniform(0.34, 0.50),
+        "plank": bw * rng.uniform(0.28, 0.40),
+        "farmers_walk": bw * rng.uniform(0.55, 0.95),
+        "leg_raises": bw * rng.uniform(0.24, 0.34),
+        "ab_wheel": bw * rng.uniform(0.30, 0.45),
+        "dead_bug": bw * rng.uniform(0.20, 0.30),
+        "trx_bodysaw": bw * rng.uniform(0.24, 0.34),
+        "suitcase_carry": bw * rng.uniform(0.30, 0.58),
+        "bird_dog": bw * rng.uniform(0.20, 0.30),
     }
 
-    # Exercise exclusions (injury simulation)
+    # Exercise exclusions (small probability - target users are still powerlifting-focused)
     excluded = []
-    if rng.random() < 0.15:
+    # Keep some exercise exclusions for realism, but avoid over-pruning the
+    # deadlift family because posterior-chain transfer is one of the key
+    # supervision signals we need in the dataset.
+    if rng.random() < 0.03:
         excluded.append("deadlift")
-    if rng.random() < 0.10:
+    if rng.random() < 0.05:
         excluded.append("squat")
-    if rng.random() < 0.08:
+    if rng.random() < 0.04:
         excluded.append("ohp")
 
     # Session time preference
@@ -684,6 +835,10 @@ def generate_user(rng: np.random.Generator, user_id: str) -> UserProfile:
         consistency=float(rng.uniform(0.72, 1.0)),
         preferred_rest=float(np.clip(rng.normal(3.0, 0.7), 1.5, 5.0)),
         session_time_pref=time_pref,
+        split_preference=split_pref,
+        lift_focus=lift_focus,
+        squat_style=squat_style,
+        deadlift_style=deadlift_style,
         excluded_exercises=excluded,
         program_switch_week=switch_week,
         stalling=stalling,
@@ -691,150 +846,125 @@ def generate_user(rng: np.random.Generator, user_id: str) -> UserProfile:
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  WORKOUT TEMPLATES — canonical 34-exercise space                      ║
+# ║  WORKOUT TEMPLATES — powerlifting-first archetypes                    ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
 # Entry: (exercise, %1RM, sets, target_RIR, rest_multiplier)
 WorkoutEntry = Tuple[str, float, int, int, float]
 
-KEY_PAIR_BLOCKS: List[Tuple[WorkoutEntry, WorkoutEntry]] = [
-    (("bench_press", 0.78, 3, 2, 1.1), ("skull_crusher", 0.67, 3, 2, 0.7)),
-    (("bench_press", 0.76, 3, 2, 1.1), ("ohp", 0.71, 3, 2, 1.0)),
-    (("rdl", 0.74, 3, 2, 1.0), ("leg_curl", 0.70, 3, 2, 0.7)),
-    (("pendlay_row", 0.74, 3, 2, 1.0), ("lat_pulldown", 0.71, 3, 2, 0.8)),
-    (("squat", 0.77, 3, 2, 1.2), ("leg_press", 0.72, 3, 2, 1.0)),
-    (("deadlift", 0.79, 3, 2, 1.4), ("rdl", 0.73, 3, 2, 1.0)),
-]
-
-KEY_ORDERED_PAIRS: List[Tuple[str, str]] = [
+# Key ordered same-session exercise relations highlighted by Michał.
+# These are not the only pairs we care about, but they are high-value transfer
+# signals and deserve explicit coverage reporting in both train and validation.
+KEY_SEQUENCE_PAIRS: List[Tuple[str, str]] = [
     ("bench_press", "skull_crusher"),
     ("bench_press", "ohp"),
+    ("incline_bench", "dumbbell_flyes"),
     ("rdl", "leg_curl"),
-    ("pendlay_row", "lat_pulldown"),
     ("squat", "leg_press"),
     ("deadlift", "rdl"),
 ]
 
-
-def _exercise_set(entries: List[WorkoutEntry]) -> set:
-    return {ex for ex, _, _, _, _ in entries}
-
-
-def inject_cross_muscle_pair(
-    template_entries: List[WorkoutEntry],
-    rng: np.random.Generator,
-    user: UserProfile,
-) -> List[WorkoutEntry]:
-    """Inject one key pair block into a subset of sessions to strengthen transfer signal."""
-    if rng.random() >= GEN_CONFIG.pair_block_rate:
-        return template_entries
-
-    existing = _exercise_set(template_entries)
-    candidates: List[Tuple[WorkoutEntry, WorkoutEntry]] = []
-    for first, second in KEY_PAIR_BLOCKS:
-        a, b = first[0], second[0]
-        if a in user.excluded_exercises or b in user.excluded_exercises:
-            continue
-        if a not in EXERCISE_INFO or b not in EXERCISE_INFO:
-            continue
-        if a in existing and b in existing:
-            continue
-        candidates.append((first, second))
-
-    if not candidates:
-        return template_entries
-
-    first, second = candidates[int(rng.integers(0, len(candidates)))]
-    return [first, second] + template_entries
-
-
-def count_ordered_pair_sessions(df: pd.DataFrame, pair: Tuple[str, str]) -> int:
-    """Count sessions where exercise A appears before B."""
-    a, b = pair
-    cnt = 0
-    dc = df.copy()
-    dc["date"] = dc["timestamp"].str[:10]
-    for (_, _), grp in dc.groupby(["user_id", "date"]):
-        seq = grp.sort_values("timestamp")["exercise"].tolist()
-        if a in seq and b in seq and seq.index(a) < seq.index(b):
-            cnt += 1
-    return cnt
-
 TEMPLATES: Dict[str, List[WorkoutEntry]] = {
-    "push_vol": [
-        ("bench_press", 0.75, 4, 2, 1.1), ("incline_bench", 0.72, 3, 2, 1.0),
-        ("spoto_press", 0.74, 3, 2, 1.0), ("ohp", 0.70, 3, 2, 1.0),
-        ("dips", 0.70, 3, 2, 0.8), ("skull_crusher", 0.68, 3, 3, 0.7),
+    "bench_volume_day": [
+        ("bench_press", 0.76, 5, 2, 1.2), ("spoto_press", 0.72, 3, 2, 1.0),
+        ("incline_bench", 0.72, 3, 2, 0.9), ("dumbbell_flyes", 0.62, 3, 2, 0.6),
+        ("pendlay_row", 0.74, 4, 2, 1.0), ("lat_pulldown", 0.72, 3, 2, 0.8),
+        ("skull_crusher", 0.66, 3, 2, 0.6),
     ],
-    "push_str": [
-        ("bench_press", 0.87, 5, 1, 1.5), ("close_grip_bench", 0.78, 3, 2, 1.2),
-        ("incline_bench_45", 0.76, 3, 2, 1.1), ("decline_bench", 0.78, 3, 2, 1.0),
-        ("ohp", 0.76, 3, 2, 1.1),
-    ],
-    "pull_vol": [
-        ("pendlay_row", 0.75, 4, 2, 1.0), ("pull_up", 0.74, 3, 2, 1.0),
-        ("lat_pulldown", 0.72, 3, 2, 0.8), ("seal_row", 0.70, 3, 2, 0.8),
+    "bench_intensity_day": [
+        ("bench_press", 0.88, 5, 1, 1.6), ("close_grip_bench", 0.80, 3, 2, 1.2),
+        ("ohp", 0.70, 3, 2, 0.9), ("decline_bench", 0.78, 3, 2, 1.0),
+        ("chest_press_machine", 0.72, 2, 2, 0.7),
         ("reverse_fly", 0.65, 3, 3, 0.5),
     ],
-    "legs_quad": [
-        ("squat", 0.78, 4, 2, 1.3), ("high_bar_squat", 0.74, 3, 2, 1.2),
-        ("leg_press", 0.75, 3, 2, 1.0),
-        ("bulgarian_split_squat", 0.72, 3, 2, 0.8), ("leg_extension", 0.70, 3, 2, 0.7),
+    "bench_specialization_day": [
+        ("incline_bench_45", 0.74, 4, 2, 1.0), ("close_grip_bench", 0.76, 4, 2, 1.0),
+        ("dips", 0.72, 3, 2, 0.8), ("ohp", 0.72, 3, 2, 1.0),
+        ("skull_crusher", 0.64, 3, 2, 0.6), ("reverse_fly", 0.62, 3, 3, 0.5),
+        ("plank", 0.62, 2, 4, 0.5),
+    ],
+    "squat_volume_day": [
+        ("squat", 0.78, 5, 2, 1.3), ("high_bar_squat", 0.72, 3, 2, 1.1),
+        ("bulgarian_split_squat", 0.72, 3, 2, 0.8), ("leg_press", 0.75, 3, 2, 1.0),
         ("leg_curl", 0.68, 3, 2, 0.7),
     ],
-    "legs_post": [
-        ("deadlift", 0.80, 4, 2, 1.5), ("rdl", 0.75, 3, 2, 1.0),
-        ("sumo_deadlift", 0.76, 3, 2, 1.3), ("leg_curl", 0.72, 3, 2, 0.7),
-        ("leg_press", 0.70, 2, 2, 0.9),
+    "squat_intensity_day": [
+        ("low_bar_squat", 0.88, 5, 1, 1.7), ("squat", 0.80, 3, 2, 1.3),
+        ("leg_press", 0.78, 3, 2, 1.0), ("leg_extension", 0.70, 3, 2, 0.7),
+        ("leg_curl", 0.68, 3, 2, 0.7),
     ],
-    "upper_B": [
-        ("incline_bench_45", 0.75, 4, 2, 1.2), ("seal_row", 0.75, 4, 2, 1.0),
-        ("chest_press_machine", 0.72, 3, 2, 1.0), ("pull_up", 0.75, 3, 2, 1.0),
-        ("dumbbell_flyes", 0.65, 3, 2, 0.5), ("skull_crusher", 0.66, 2, 2, 0.5),
+    # Posterior-chain ladder: deadlift -> rdl -> leg_curl.
+    # This is a deliberate cross-muscle sequence to expose hamstrings/glutes
+    # transfer, which M6 still struggles to infer from the older dataset.
+    "deadlift_intensity_day": [
+        ("deadlift", 0.87, 4, 1, 1.7), ("rdl", 0.74, 3, 2, 1.0),
+        ("leg_curl", 0.68, 3, 2, 0.7), ("pendlay_row", 0.74, 4, 2, 1.0),
+        ("lat_pulldown", 0.72, 3, 2, 0.8),
     ],
-    "upper_A": [
-        ("bench_press", 0.78, 4, 2, 1.2), ("pendlay_row", 0.75, 4, 2, 1.0),
-        ("ohp", 0.72, 3, 2, 1.0), ("lat_pulldown", 0.72, 3, 2, 0.8),
-        ("skull_crusher", 0.68, 2, 2, 0.7), ("reverse_fly", 0.65, 2, 2, 0.5),
+    "deadlift_sumo_day": [
+        ("sumo_deadlift", 0.85, 4, 1, 1.6), ("rdl", 0.72, 3, 2, 1.0),
+        ("leg_curl", 0.68, 3, 2, 0.7), ("seal_row", 0.72, 3, 2, 0.9),
+        ("pull_up", 0.74, 3, 2, 0.9), ("farmers_walk", 0.70, 2, 2, 0.8),
     ],
-    "lower_A": [
-        ("squat", 0.80, 4, 2, 1.3), ("rdl", 0.75, 3, 2, 1.1),
-        ("leg_press", 0.72, 3, 2, 1.0), ("leg_curl", 0.70, 3, 2, 0.7),
-        ("low_bar_squat", 0.74, 2, 2, 1.0),
+    "upper_support_day": [
+        ("ohp", 0.74, 4, 2, 1.0), ("pendlay_row", 0.74, 4, 2, 1.0),
+        ("pull_up", 0.74, 3, 2, 0.9), ("chest_press_machine", 0.70, 3, 2, 0.8),
+        ("reverse_fly", 0.65, 3, 3, 0.5), ("skull_crusher", 0.64, 3, 2, 0.6),
+        ("leg_raises", 0.66, 2, 3, 0.6),
     ],
-    "lower_B": [
-        ("deadlift", 0.82, 4, 2, 1.5), ("sumo_deadlift", 0.76, 3, 2, 1.2),
-        ("rdl", 0.75, 3, 2, 1.0), ("leg_extension", 0.70, 3, 2, 0.7),
-        ("leg_curl", 0.70, 3, 2, 0.7),
+    "lower_accessory_day": [
+        ("high_bar_squat", 0.74, 4, 2, 1.1), ("rdl", 0.70, 3, 2, 0.9),
+        ("bulgarian_split_squat", 0.70, 3, 2, 0.8), ("leg_press", 0.72, 3, 2, 1.0),
+        ("leg_extension", 0.68, 3, 2, 0.7), ("leg_curl", 0.68, 3, 2, 0.7),
+        ("ab_wheel", 0.64, 2, 3, 0.6),
     ],
-    "core_day": [
-        ("plank", 0.60, 3, 3, 0.7), ("ab_wheel", 0.65, 3, 2, 0.7),
-        ("dead_bug", 0.55, 3, 3, 0.7), ("trx_bodysaw", 0.62, 3, 2, 0.7),
-        ("leg_raises", 0.60, 3, 2, 0.7), ("farmers_walk", 0.70, 3, 3, 0.7),
-        ("suitcase_carry", 0.65, 3, 3, 0.7), ("bird_dog", 0.55, 2, 3, 0.7),
+    "powerbuilding_upper_day": [
+        ("incline_bench", 0.74, 4, 2, 0.9), ("dumbbell_flyes", 0.62, 3, 2, 0.6),
+        ("ohp", 0.72, 4, 2, 0.9), ("pendlay_row", 0.72, 4, 2, 1.0),
+        ("lat_pulldown", 0.70, 3, 2, 0.8),
+        ("dips", 0.70, 3, 2, 0.8), ("reverse_fly", 0.62, 3, 3, 0.5),
+        ("trx_bodysaw", 0.62, 2, 3, 0.6),
     ],
-    "fb_A": [
-        ("squat", 0.78, 3, 2, 1.3), ("bench_press", 0.78, 3, 2, 1.2),
-        ("pendlay_row", 0.75, 3, 2, 1.0), ("rdl", 0.70, 2, 2, 1.0),
-        ("ab_wheel", 0.65, 2, 3, 0.6),
+    "powerbuilding_lower_day": [
+        ("high_bar_squat", 0.76, 4, 2, 1.2), ("sumo_deadlift", 0.76, 3, 2, 1.3),
+        ("rdl", 0.68, 2, 3, 0.9), ("leg_press", 0.76, 3, 2, 1.0),
+        ("bulgarian_split_squat", 0.70, 3, 2, 0.8), ("leg_curl", 0.68, 3, 2, 0.7),
+        ("suitcase_carry", 0.64, 2, 3, 0.7),
     ],
-    "fb_B": [
-        ("deadlift", 0.80, 3, 2, 1.5), ("spoto_press", 0.75, 3, 2, 1.0),
-        ("lat_pulldown", 0.72, 3, 2, 0.8), ("leg_press", 0.72, 2, 2, 1.0),
-        ("plank", 0.60, 2, 3, 0.6),
+    "peak_bench_day": [
+        ("bench_press", 0.92, 3, 0, 2.0), ("spoto_press", 0.82, 2, 1, 1.3),
+        ("close_grip_bench", 0.78, 2, 2, 1.1),
     ],
-    # ── DELOAD [53] ──
-    "deload_upper": [
+    "peak_squat_day": [
+        ("low_bar_squat", 0.91, 3, 0, 2.0), ("squat", 0.82, 2, 1, 1.4),
+        ("leg_press", 0.70, 2, 3, 0.9),
+    ],
+    "peak_deadlift_day": [
+        ("deadlift", 0.91, 2, 0, 2.0), ("rdl", 0.68, 2, 3, 1.0),
+        ("leg_curl", 0.60, 2, 4, 0.7), ("pendlay_row", 0.70, 2, 2, 0.9),
+    ],
+    "deload_upper_pl": [
         ("bench_press", 0.62, 3, 4, 1.0), ("pendlay_row", 0.60, 3, 4, 1.0),
-        ("ohp", 0.58, 2, 4, 0.8), ("skull_crusher", 0.55, 2, 5, 0.7),
+        ("ohp", 0.58, 2, 4, 0.8), ("reverse_fly", 0.55, 2, 5, 0.5),
+        ("dead_bug", 0.52, 2, 5, 0.5),
     ],
-    "deload_lower": [
+    "deload_lower_pl": [
         ("squat", 0.62, 3, 4, 1.2), ("rdl", 0.58, 2, 4, 1.0),
-        ("leg_extension", 0.55, 2, 5, 0.7), ("leg_curl", 0.55, 2, 5, 0.7),
+        ("leg_press", 0.58, 2, 4, 0.9), ("leg_curl", 0.55, 2, 5, 0.7),
+        ("bird_dog", 0.50, 2, 5, 0.5),
     ],
-    "deload_full": [
-        ("high_bar_squat", 0.60, 2, 4, 1.2), ("close_grip_bench", 0.60, 2, 4, 1.0),
-        ("seal_row", 0.58, 2, 4, 1.0), ("dead_bug", 0.55, 2, 5, 0.8),
+    "deload_full_pl": [
+        ("bench_press", 0.60, 2, 4, 1.0), ("squat", 0.60, 2, 4, 1.2),
+        ("deadlift", 0.58, 1, 4, 1.6),
+    ],
+    "core_stability_day": [
+        ("plank", 0.68, 3, 3, 0.5), ("ab_wheel", 0.66, 3, 2, 0.6),
+        ("trx_bodysaw", 0.64, 3, 3, 0.6), ("dead_bug", 0.58, 2, 4, 0.5),
+        ("bird_dog", 0.56, 2, 4, 0.5),
+    ],
+    "loaded_core_day": [
+        ("farmers_walk", 0.72, 3, 2, 0.8), ("suitcase_carry", 0.66, 3, 2, 0.8),
+        ("leg_raises", 0.68, 3, 2, 0.6),
     ],
 }
 
@@ -846,22 +976,78 @@ class Schedule:
     deload_days: Tuple[Optional[str], ...]
 
 SCHEDULES: List[Schedule] = [
-    Schedule("PPL_6", days=(
-        "push_vol","pull_vol","legs_quad","push_str","upper_B","legs_post",None),
-        deload_days=("deload_upper","deload_upper","deload_lower",None,None,None,None)),
-    Schedule("UL_4", days=(
-        "upper_A","lower_A",None,"upper_B","lower_B",None,None),
-        deload_days=("deload_upper","deload_lower",None,"deload_upper",None,None,None)),
-    Schedule("FB_3", days=(
-        "fb_A",None,"fb_B",None,"core_day",None,None),
-        deload_days=("deload_full",None,"deload_full",None,None,None,None)),
-    Schedule("PL_4", days=(
-        "push_str","legs_quad",None,"push_vol","legs_post",None,None),
-        deload_days=("deload_upper","deload_lower",None,"deload_upper",None,None,None)),
-    Schedule("Core_3", days=(
-        "core_day",None,"fb_A",None,"core_day",None,None),
-        deload_days=("deload_full",None,"deload_full",None,None,None,None)),
+    Schedule("PL_3_BASE", days=(
+        "squat_volume_day", None, "bench_volume_day", None, "deadlift_intensity_day", None, None),
+        deload_days=("deload_lower_pl", None, "deload_upper_pl", None, "deload_full_pl", None, None)),
+    Schedule("PL_4_CLASSIC", days=(
+        "bench_volume_day", "squat_intensity_day", None, "bench_intensity_day", "deadlift_intensity_day", None, None),
+        deload_days=("deload_upper_pl", "deload_lower_pl", None, "deload_upper_pl", "deload_lower_pl", None, None)),
+    Schedule("PL_4_BENCH", days=(
+        "bench_intensity_day", "squat_volume_day", None, "bench_specialization_day", "deadlift_intensity_day", None, None),
+        deload_days=("deload_upper_pl", "deload_lower_pl", None, "deload_upper_pl", "deload_lower_pl", None, None)),
+    Schedule("PL_4_DEADLIFT", days=(
+        "bench_volume_day", "squat_volume_day", None, "deadlift_sumo_day", "upper_support_day", None, None),
+        deload_days=("deload_upper_pl", "deload_lower_pl", None, "deload_lower_pl", "deload_upper_pl", None, None)),
+    Schedule("PL_4_OFFSEASON", days=(
+        "powerbuilding_upper_day", "powerbuilding_lower_day", None, "bench_volume_day", "lower_accessory_day", "core_stability_day", None),
+        deload_days=("deload_upper_pl", "deload_lower_pl", None, "deload_upper_pl", "deload_lower_pl", None, None)),
+    Schedule("PL_5_POWERBUILDING", days=(
+        "bench_volume_day", "squat_volume_day", "upper_support_day", "deadlift_intensity_day", "bench_specialization_day", "loaded_core_day", None),
+        deload_days=("deload_upper_pl", "deload_lower_pl", "deload_upper_pl", "deload_lower_pl", "deload_upper_pl", None, None)),
+    Schedule("PL_3_PEAK", days=(
+        "peak_squat_day", None, "peak_bench_day", None, "peak_deadlift_day", None, None),
+        deload_days=("deload_lower_pl", None, "deload_upper_pl", None, "deload_full_pl", None, None)),
 ]
+
+
+def choose_schedule_pair(rng: np.random.Generator, user: UserProfile,
+                         schedules: List[Schedule]) -> Tuple[Schedule, Schedule]:
+    """Choose a primary and fallback schedule biased toward powerlifting behavior."""
+    by_name = {s.name: s for s in schedules}
+
+    if user.split_preference == 5:
+        primary_name = "PL_5_POWERBUILDING"
+        alt_name = "PL_4_OFFSEASON"
+    elif user.split_preference == 3:
+        primary_name = "PL_3_PEAK" if user.training_level in ("advanced", "elite") and rng.random() < 0.35 else "PL_3_BASE"
+        alt_name = "PL_3_BASE" if primary_name == "PL_3_PEAK" else "PL_3_PEAK"
+    else:
+        if user.lift_focus == "bench":
+            primary_name, alt_name = "PL_4_BENCH", "PL_4_CLASSIC"
+        elif user.lift_focus == "deadlift":
+            primary_name, alt_name = "PL_4_DEADLIFT", "PL_4_CLASSIC"
+        elif user.lift_focus == "squat":
+            primary_name, alt_name = "PL_4_CLASSIC", "PL_4_OFFSEASON"
+        else:
+            primary_name, alt_name = (
+                ("PL_4_OFFSEASON", "PL_4_CLASSIC")
+                if rng.random() < 0.35 else
+                ("PL_4_CLASSIC", "PL_4_OFFSEASON")
+            )
+
+    return by_name[primary_name], by_name[alt_name]
+
+# ── MINI TEMPLATES (MVP: bench_press, squat, deadlift only) ────────────────
+# Used by --mini mode.  3-day upper/lower/posterior split.
+MINI_TEMPLATES: Dict[str, List[WorkoutEntry]] = {
+    "mini_bench_vol":   [("bench_press", 0.75, 4, 2, 1.1)],
+    "mini_bench_str":   [("bench_press", 0.87, 5, 1, 1.5)],
+    "mini_squat":       [("squat",       0.78, 4, 2, 1.3)],
+    "mini_deadlift":    [("deadlift",    0.80, 3, 2, 1.5)],
+    "mini_deload_upper":[("bench_press", 0.62, 3, 4, 1.0)],
+    "mini_deload_lower":[("squat",       0.62, 3, 4, 1.2)],
+}
+MINI_SCHEDULE = Schedule(
+    name="MINI_3",
+    days=(
+        "mini_bench_vol", "mini_squat", None,
+        "mini_bench_str", "mini_deadlift", None, None,
+    ),
+    deload_days=(
+        "mini_deload_upper", "mini_deload_lower", None,
+        None, None, None, None,
+    ),
+)
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
@@ -997,50 +1183,83 @@ def simulate_set(rng: np.random.Generator, user: UserProfile,
 # ║  WORKOUT SIMULATOR                                                     ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
+def _weighted_recovery_multiplier(muscles: Dict[str, float],
+                                  user: UserProfile,
+                                  current_time: datetime) -> float:
+    """Exercise-level recovery from weighted involved-muscle recovery.
+
+    Recovery timing is literature-informed [32]-[39], while the exercise-level
+    aggregation below is an explicit engineering heuristic: we blend a weighted
+    mean with a weighted-worst component so a tiny tertiary muscle does not
+    fully bottleneck the entire exercise, while primary muscles still dominate.
+    """
+    if not muscles:
+        return 1.0
+
+    total = sum(max(v, 0.0) for v in muscles.values()) or 1.0
+    normalized = {m: max(v, 0.0) / total for m, v in muscles.items()}
+    recoveries: List[Tuple[float, float]] = []
+
+    for muscle, weight in normalized.items():
+        last_time = user.muscle_last_trained.get(muscle, datetime(2024, 1, 1))
+        hours_since = (current_time - last_time).total_seconds() / 3600
+        severity = user.muscle_last_severity.get(muscle, "moderate")
+        region = user.muscle_last_region.get(muscle, MUSCLE_RECOVERY_REGION.get(muscle, "upper"))
+        rec = session_recovery_multiplier(hours_since, region, severity)
+        recoveries.append((weight, rec))
+
+    weighted_mean = sum(w * rec for w, rec in recoveries)
+    weighted_worst = min(rec / max(w, 1e-6) ** 0.15 for w, rec in recoveries)
+    return float(np.clip(0.72 * weighted_mean + 0.28 * weighted_worst, 0.55, 1.0))
+
+
 def get_recovery_for_exercise(user: UserProfile, exercise: str,
                               current_time: datetime) -> float:
     """Lookup inter-session recovery multiplier. [32]-[39]"""
     muscles = EXERCISE_MUSCLES.get(exercise, {})
-    if not muscles:
-        return 1.0
-    worst_recovery = 1.0
-    for muscle in muscles:
-        last_time = user.muscle_last_trained.get(muscle, datetime(2024, 1, 1))
-        hours_since = (current_time - last_time).total_seconds() / 3600
-        severity = user.muscle_last_severity.get(muscle, "moderate")
-        region = user.muscle_last_region.get(muscle, "upper")
-        rec = session_recovery_multiplier(hours_since, region, severity)
-        worst_recovery = min(worst_recovery, rec)
-    return worst_recovery
+    return _weighted_recovery_multiplier(muscles, user, current_time)
 
 
 def update_muscle_history(user: UserProfile, exercise: str,
                           timestamp: datetime, total_sets: int,
                           avg_rir: float):
-    """Record training for inter-session recovery tracking."""
+    """Record training for inter-session recovery tracking.
+
+    Severity is scaled by transformed involvement so compounds do not assign the
+    same recovery debt to every stabilizer. Region mapping is anatomy-driven,
+    with a deadlift-specific profile only for posterior-chain muscles.
+    """
     info = EXERCISE_INFO[exercise]
     muscles = EXERCISE_MUSCLES.get(exercise, {})
-    if total_sets >= 5 and avg_rir <= 1:
-        severity = "hard"
-    elif total_sets >= 8:
-        severity = "extreme"
-    else:
-        severity = "moderate"
-    for muscle in muscles:
+    for muscle, involvement in muscles.items():
+        # Highly involved muscles should accumulate more recovery debt than
+        # weakly involved stabilizers from the same exercise.
+        stress = total_sets * (1.35 - 0.12 * avg_rir) * involvement
+        if stress >= 5.5:
+            severity = "extreme"
+        elif stress >= 2.8:
+            severity = "hard"
+        else:
+            severity = "moderate"
         existing = user.muscle_last_trained.get(muscle, datetime(2024, 1, 1))
         if timestamp > existing:
             user.muscle_last_trained[muscle] = timestamp
             user.muscle_last_severity[muscle] = severity
-            user.muscle_last_region[muscle] = info.body_region
+            if info.body_region == "deadlift" and muscle in {"erectors", "glutes", "hamstrings"}:
+                user.muscle_last_region[muscle] = "deadlift"
+            else:
+                user.muscle_last_region[muscle] = MUSCLE_RECOVERY_REGION.get(muscle, info.body_region)
 
 
 def simulate_workout(rng: np.random.Generator, user: UserProfile,
                      template_name: str, start_time: datetime,
                      week_in_meso: int,
-                     include_warmups: bool = True) -> List[Dict]:
+                     include_warmups: bool = True,
+                     templates: Optional[Dict[str, List[WorkoutEntry]]] = None,
+                     ) -> List[Dict]:
     """Generate all sets for one workout session."""
-    template = list(TEMPLATES[template_name])
-    template = inject_cross_muscle_pair(template, rng, user)
+    _templates = templates if templates is not None else TEMPLATES
+    template = _templates[template_name]
     rows: List[Dict] = []
     t = start_time
     daily_mult = daily_1rm_multiplier(rng, user.daily_cv)
@@ -1096,16 +1315,18 @@ def simulate_workout(rng: np.random.Generator, user: UserProfile,
 
         for set_idx in range(1, n_sets + 1):
             actual_rest = rest_minutes * rng.uniform(0.80, 1.25)
+            ordinal_mult = ordinal_set_capacity_multiplier(exercise, set_idx, rng)
+            set1_max_for_set = set1_max * ordinal_mult
             row = simulate_set(
                 rng, user, exercise, weight, target_rir,
-                set_idx, actual_rest, set1_max, t, pct_effective
+                set_idx, actual_rest, set1_max_for_set, t, pct_effective
             )
             if row is None:
                 weight = round_weight(weight * 0.90, info.weight_increment)
                 weight = max(weight, info.min_weight_kg)
                 row = simulate_set(
                     rng, user, exercise, weight, target_rir,
-                    set_idx, actual_rest, set1_max, t, pct_effective
+                    set_idx, actual_rest, set1_max_for_set, t, pct_effective
                 )
                 if row is None:
                     break
@@ -1143,14 +1364,19 @@ def simulate_workout(rng: np.random.Generator, user: UserProfile,
 
 def simulate_program(rng: np.random.Generator, user: UserProfile,
                      n_weeks: int, start_date: datetime,
-                     include_warmups: bool = True) -> List[Dict]:
+                     include_warmups: bool = True,
+                     templates: Optional[Dict[str, List[WorkoutEntry]]] = None,
+                     fixed_schedule: Optional[Schedule] = None,
+                     ) -> List[Dict]:
     """Generate n_weeks of training for one user. [53]"""
-    schedule_idx = rng.integers(len(SCHEDULES))
-    schedule = SCHEDULES[schedule_idx]
+    _templates = templates if templates is not None else TEMPLATES
+    _schedules = SCHEDULES
 
-    # Handle program switch mid-year
-    alt_schedule_idx = (schedule_idx + rng.integers(1, len(SCHEDULES))) % len(SCHEDULES)
-    alt_schedule = SCHEDULES[alt_schedule_idx]
+    if fixed_schedule is not None:
+        schedule = fixed_schedule
+        alt_schedule = fixed_schedule
+    else:
+        schedule, alt_schedule = choose_schedule_pair(rng, user, _schedules)
 
     all_rows: List[Dict] = []
     current_date = start_date
@@ -1161,7 +1387,7 @@ def simulate_program(rng: np.random.Generator, user: UserProfile,
 
         # Switch programs if applicable
         active_schedule = schedule
-        if user.program_switch_week and week_idx >= user.program_switch_week:
+        if fixed_schedule is None and user.program_switch_week and week_idx >= user.program_switch_week:
             active_schedule = alt_schedule
 
         for day_idx in range(7):
@@ -1191,7 +1417,8 @@ def simulate_program(rng: np.random.Generator, user: UserProfile,
             session_start = current_date.replace(hour=hour, minute=minute)
 
             workout_rows = simulate_workout(
-                rng, user, template, session_start, week_in_meso, include_warmups
+                rng, user, template, session_start, week_in_meso,
+                include_warmups, _templates,
             )
             all_rows.extend(workout_rows)
             current_date += timedelta(days=1)
@@ -1213,207 +1440,326 @@ def simulate_program(rng: np.random.Generator, user: UserProfile,
 # ║  DATASET GENERATOR                                                     ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
-def _find_donor_exercise(exercise: str, counts: Dict[str, int]) -> Optional[str]:
-    """Pick a donor exercise for rare zero-count cases (same category preferred)."""
-    if exercise not in EXERCISE_INFO:
-        return None
-    info = EXERCISE_INFO[exercise]
-    candidates = [
-        ex for ex, c in counts.items()
-        if c > 0 and ex != exercise and ex in EXERCISE_INFO and EXERCISE_INFO[ex].category == info.category
-    ]
-    if not candidates:
-        candidates = [ex for ex, c in counts.items() if c > 0 and ex != exercise]
-    if not candidates:
-        return None
-    candidates.sort(key=lambda ex: muscle_overlap(exercise, ex), reverse=True)
-    return candidates[0]
+def _user_in_val(user_id: str, val_ratio: float, seed: int) -> bool:
+    """Deterministic train/val split by user_id hash. No data leakage.
+
+    Uses MD5 of (seed, user_id) so assignment is stable across runs
+    regardless of generation order.
+    """
+    digest = hashlib.md5(f"{seed}:{user_id}".encode()).hexdigest()
+    bucket = int(digest[:8], 16) % 10_000
+    return bucket < int(val_ratio * 10_000)
 
 
-def enforce_exercise_floor(df: pd.DataFrame, min_rows_per_exercise: int, seed: int) -> pd.DataFrame:
-    """Ensure each exercise has at least min_rows_per_exercise rows via conservative bootstrapping."""
-    if len(df) == 0 or min_rows_per_exercise <= 0:
-        return df
+def generate_dataset(
+    n_users: int = 208,
+    n_weeks: int = 65,
+    seed: int = 42,
+    include_warmups: bool = True,
+    yaml_path: Optional[str] = None,
+    mini: bool = False,
+    val_ratio: float = 0.20,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Generate the full synthetic dataset.
 
-    rng = np.random.default_rng(seed + 1000)
-    target_exercises = sorted(set(ALL_EXERCISES) | set(EXERCISE_INFO.keys()))
-    counts = df.groupby("exercise").size().to_dict()
-    augmented = [df]
+    Returns:
+        (train_df, val_df) split at user level (no leakage).
+        mini=True: 5 users × 4 weeks, only YAML-defined exercises.
+    """
+    # Load YAML (idempotent if already loaded)
+    load_exercise_yaml(yaml_path)
 
-    for ex in target_exercises:
-        curr = int(counts.get(ex, 0))
-        if curr >= min_rows_per_exercise:
-            continue
-        need = min_rows_per_exercise - curr
+    if mini:
+        n_users = min(n_users, 5)
+        n_weeks = min(n_weeks, 4)
 
-        src_ex = ex
-        if curr == 0:
-            donor = _find_donor_exercise(ex, counts)
-            if donor is None:
-                continue
-            src_ex = donor
-
-        source_rows = df[df["exercise"] == src_ex]
-        if len(source_rows) == 0:
-            continue
-
-        sample_idx = rng.integers(0, len(source_rows), size=need)
-        sample = source_rows.iloc[sample_idx].copy()
-        sample["exercise"] = ex
-
-        # Small perturbations avoid creating exact duplicates while preserving bounds.
-        w_noise = rng.normal(1.0, 0.03, size=need)
-        sample["weight_kg"] = np.clip(sample["weight_kg"].to_numpy() * w_noise, 0.0, None).round(1)
-        rep_noise = rng.integers(-1, 2, size=need)
-        sample["reps"] = np.clip(sample["reps"].to_numpy() + rep_noise, 1, 30).astype(int)
-        rir_noise = rng.integers(-1, 2, size=need)
-        sample["rir"] = np.clip(sample["rir"].to_numpy() + rir_noise, 0, 5).astype(int)
-
-        ts = pd.to_datetime(sample["timestamp"], format="ISO8601", errors="coerce")
-        delta_min = rng.integers(5, 240, size=need)
-        ts = ts + pd.to_timedelta(delta_min, unit="m")
-        sample["timestamp"] = ts.dt.strftime("%Y-%m-%dT%H:%M:%S")
-
-        augmented.append(sample)
-        counts[ex] = min_rows_per_exercise
-
-    out = pd.concat(augmented, ignore_index=True)
-
-    # Guarantee pass: fill any residual gaps using the already-augmented frame.
-    counts2 = out.groupby("exercise").size().to_dict()
-    extra = []
-    for ex in target_exercises:
-        curr = int(counts2.get(ex, 0))
-        if curr >= min_rows_per_exercise:
-            continue
-        need = min_rows_per_exercise - curr
-        donor = _find_donor_exercise(ex, counts2)
-        if donor is None:
-            continue
-        source_rows = out[out["exercise"] == donor]
-        if len(source_rows) == 0:
-            continue
-        sample_idx = rng.integers(0, len(source_rows), size=need)
-        sample = source_rows.iloc[sample_idx].copy()
-        sample["exercise"] = ex
-        sample["weight_kg"] = np.clip(sample["weight_kg"].to_numpy() * rng.normal(1.0, 0.03, size=need), 0.0, None).round(1)
-        sample["reps"] = np.clip(sample["reps"].to_numpy() + rng.integers(-1, 2, size=need), 1, 30).astype(int)
-        sample["rir"] = np.clip(sample["rir"].to_numpy() + rng.integers(-1, 2, size=need), 0, 5).astype(int)
-        ts = pd.to_datetime(sample["timestamp"], format="ISO8601", errors="coerce")
-        ts = ts + pd.to_timedelta(rng.integers(5, 240, size=need), unit="m")
-        sample["timestamp"] = ts.dt.strftime("%Y-%m-%dT%H:%M:%S")
-        extra.append(sample)
-
-    if extra:
-        out = pd.concat([out] + extra, ignore_index=True)
-
-    out = out.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
-    return out
-
-
-def compute_quality_metrics(df: pd.DataFrame, floor_target: int) -> Dict[str, float]:
-    """Compact quality metrics used for diagnostics and config search."""
-    if len(df) == 0:
-        return {
-            "rows": 0.0,
-            "rir_0_3_pct": 0.0,
-            "mean_reps": 0.0,
-            "floor_pass_pct": 0.0,
-            "pair_mean": 0.0,
-            "bench_s2s1": 0.0,
-            "score": -1e9,
-        }
-
-    counts = df.groupby("exercise").size()
-    floor_pass = sum(int(counts.get(ex, 0) >= floor_target) for ex in ALL_EXERCISES) / max(1, len(ALL_EXERCISES))
-
-    dc = df.copy()
-    dc["date"] = dc["timestamp"].str[:10]
-    n_sessions = dc.groupby(["user_id", "date"]).ngroups
-
-    pair_counts = [count_ordered_pair_sessions(df, pair) for pair in KEY_ORDERED_PAIRS]
-    pair_mean = (sum(pair_counts) / len(pair_counts)) / max(1, n_sessions)
-
-    rir_0_3_pct = float(((df["rir"] >= 0) & (df["rir"] <= 3)).mean())
-    mean_reps = float(df["reps"].mean())
-
-    bench = df[df["exercise"] == "bench_press"].copy()
-    bench["date"] = bench["timestamp"].str[:10]
-    s2_s1 = []
-    for (_, _), grp in bench.groupby(["user_id", "date"]):
-        sets = grp.sort_values("timestamp")
-        working = sets[sets["rir"] < 4]
-        if len(working) >= 2 and working["reps"].iloc[0] > 0:
-            s2_s1.append(float(working["reps"].iloc[1] / working["reps"].iloc[0]))
-        if len(s2_s1) >= 400:
-            break
-    bench_s2s1 = float(np.mean(s2_s1)) if s2_s1 else 0.0
-
-    # Score near target bands: RIR0-3 ≈ 0.78, reps ≈ 8.5, S2/S1 ≈ 0.85.
-    score = 0.0
-    score -= abs(rir_0_3_pct - 0.78) * 4.0
-    score -= abs(mean_reps - 8.5) * 0.15
-    score -= abs(bench_s2s1 - 0.85) * 1.5
-    score += floor_pass * 2.5
-    score += min(pair_mean / 0.10, 1.0) * 2.0
-
-    return {
-        "rows": float(len(df)),
-        "rir_0_3_pct": rir_0_3_pct,
-        "mean_reps": mean_reps,
-        "floor_pass_pct": float(floor_pass),
-        "pair_mean": float(pair_mean),
-        "bench_s2s1": bench_s2s1,
-        "score": float(score),
-    }
-
-def generate_dataset(n_users: int = 200, n_weeks: int = 52,
-                     seed: int = 42, include_warmups: bool = True,
-                     target_rows: Optional[int] = None,
-                     floor_min_rows: Optional[int] = None) -> pd.DataFrame:
-    """Generate the full synthetic dataset."""
     rng = np.random.default_rng(seed)
     start_date = datetime(2024, 1, 1)
     all_rows: List[Dict] = []
-    report_every = 20
-    i = 0
+    report_every = max(1, n_users // 20)
 
-    while True:
-        need_more_users = i < n_users
-        need_more_rows = target_rows is not None and len(all_rows) < target_rows
-        if not (need_more_users or need_more_rows):
-            break
+    templates = MINI_TEMPLATES if mini else None
+    fixed_schedule = MINI_SCHEDULE if mini else None
 
+    for i in range(n_users):
         if i % report_every == 0:
-            row_str = f", rows={len(all_rows):,}" if target_rows is not None else ""
-            print(f"\r  Users generated: {i:,}{row_str}", end="", flush=True)
-
-        user = generate_user(rng, f"user_{i:05d}")
-        rows = simulate_program(rng, user, n_weeks, start_date, include_warmups)
+            print(f"\r  Users: {i:,}/{n_users:,} ({i/n_users*100:.0f}%)",
+                  end="", flush=True)
+        user_id = f"user_{i:05d}"
+        user = generate_user(rng, user_id)
+        rows = simulate_program(
+            rng, user, n_weeks, start_date, include_warmups,
+            templates=templates, fixed_schedule=fixed_schedule,
+        )
         all_rows.extend(rows)
-        i += 1
 
-        if target_rows is not None and i > max(n_users * 5, 5000):
-            break
-
-    print(f"\r  Users generated: {i:,}, rows={len(all_rows):,}    ")
+    print(f"\r  Users: {n_users:,}/{n_users:,} (100%)    ")
 
     df = pd.DataFrame(all_rows)
     if len(df) == 0:
-        return df
-
-    per_ex_floor = floor_min_rows
-    if per_ex_floor is None:
-        per_ex_floor = max(
-            GEN_CONFIG.floor_min_rows,
-            int((GEN_CONFIG.floor_fraction_per_exercise * len(df)) / max(1, len(ALL_EXERCISES))),
-        )
-
-    if per_ex_floor > 0:
-        df = enforce_exercise_floor(df, per_ex_floor, seed)
+        empty = pd.DataFrame(columns=["user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"])
+        return empty, empty
 
     df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
-    return df
+
+    train_df, val_df = _split_dataset_by_users_with_sequence_coverage(
+        df=df,
+        val_ratio=val_ratio,
+        seed=seed,
+    )
+    return train_df, val_df
+
+
+def _ordered_unique_exercises(exercises: List[str]) -> List[str]:
+    ordered: List[str] = []
+    seen = set()
+    for exercise in exercises:
+        if exercise not in seen:
+            seen.add(exercise)
+            ordered.append(exercise)
+    return ordered
+
+
+def _ordered_session_pairs(exercises: List[str]) -> List[Tuple[str, str]]:
+    ordered = _ordered_unique_exercises(exercises)
+    return [
+        (ordered[i], ordered[j])
+        for i in range(len(ordered))
+        for j in range(i + 1, len(ordered))
+    ]
+
+
+def _build_sequence_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """Build same-session ordered exercise-pair coverage statistics.
+
+    We intentionally track training-sensible ordered pairs within a session
+    rather than every arbitrary cross-session combination.
+    """
+    if len(df) == 0:
+        return pd.DataFrame(
+            columns=["src", "dst", "session_count", "user_count", "sessions", "users"]
+        )
+
+    dc = df[["user_id", "exercise", "timestamp"]].copy()
+    dc["timestamp_dt"] = pd.to_datetime(dc["timestamp"], format="ISO8601")
+    dc = dc.sort_values(["user_id", "timestamp_dt"]).reset_index(drop=True)
+    dc["prev_timestamp"] = dc.groupby("user_id")["timestamp_dt"].shift(1)
+    dc["new_session"] = (
+        dc["prev_timestamp"].isna()
+        | ((dc["timestamp_dt"] - dc["prev_timestamp"]).dt.total_seconds() > 4 * 3600)
+    )
+    dc["session_index"] = dc.groupby("user_id")["new_session"].cumsum().astype(int)
+    dc["session_key"] = (
+        dc["timestamp_dt"].dt.strftime("%Y-%m-%d")
+        + "#"
+        + dc["session_index"].astype(str)
+    )
+
+    session_rows: List[Dict[str, Any]] = []
+    for (user_id, session_key), group in dc.groupby(["user_id", "session_key"], sort=False):
+        ordered = _ordered_session_pairs(group.sort_values("timestamp")["exercise"].tolist())
+        if not ordered:
+            continue
+        for src, dst in ordered:
+            session_rows.append(
+                {
+                    "user_id": user_id,
+                    "session_key": session_key,
+                    "src": src,
+                    "dst": dst,
+                }
+            )
+
+    if not session_rows:
+        return pd.DataFrame(
+            columns=["src", "dst", "session_count", "user_count", "sessions", "users"]
+        )
+
+    pair_df = pd.DataFrame(session_rows)
+    stats = (
+        pair_df.groupby(["src", "dst"])
+        .agg(
+            session_count=("session_key", "count"),
+            user_count=("user_id", "nunique"),
+            sessions=("session_key", lambda s: tuple(sorted(set(s)))),
+            users=("user_id", lambda s: tuple(sorted(set(s)))),
+        )
+        .reset_index()
+    )
+    return stats.sort_values(["user_count", "session_count", "src", "dst"], ascending=[False, False, True, True])
+
+
+def _build_user_sequence_map(df: pd.DataFrame) -> Dict[str, set[Tuple[str, str]]]:
+    stats = _build_sequence_stats(df)
+    user_map: Dict[str, set[Tuple[str, str]]] = {
+        uid: set() for uid in sorted(df["user_id"].unique())
+    }
+    if len(stats) == 0:
+        return user_map
+    for row in stats.itertuples(index=False):
+        pair = (row.src, row.dst)
+        for user_id in row.users:
+            user_map.setdefault(user_id, set()).add(pair)
+    return user_map
+
+
+def _split_dataset_by_users_with_sequence_coverage(
+    df: pd.DataFrame,
+    val_ratio: float,
+    seed: int,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """User-level split with sequence coverage repair.
+
+    Base assignment is deterministic hash split. We then repair the split so
+    every ordered same-session pair observed for at least two users appears in
+    both train and val when feasible.
+    """
+    user_ids = sorted(df["user_id"].unique())
+    if not user_ids:
+        empty = df.copy()
+        return empty, empty
+
+    target_val = max(1, int(round(len(user_ids) * val_ratio)))
+    user_pair_map = _build_user_sequence_map(df)
+
+    all_pair_users: Dict[Tuple[str, str], set[str]] = {}
+    for user_id, pairs in user_pair_map.items():
+        for pair in pairs:
+            all_pair_users.setdefault(pair, set()).add(user_id)
+
+    required_pairs = {
+        pair for pair, users in all_pair_users.items()
+        if len(users) >= 2
+    }
+
+    val_users = {
+        uid for uid in user_ids
+        if _user_in_val(uid, val_ratio, seed)
+    }
+
+    if len(val_users) == 0:
+        val_users.add(user_ids[0])
+    while len(val_users) > target_val:
+        removable = [
+            uid for uid in sorted(val_users)
+            if len(user_pair_map.get(uid, set()) & required_pairs) == 0
+        ]
+        if not removable:
+            break
+        val_users.remove(removable[0])
+    while len(val_users) < target_val:
+        candidates = [
+            uid for uid in user_ids
+            if uid not in val_users
+        ]
+        if not candidates:
+            break
+        candidates.sort(key=lambda uid: len(user_pair_map.get(uid, set()) & required_pairs), reverse=True)
+        val_users.add(candidates[0])
+
+    def pair_side_counts(current_val_users: set[str]) -> Dict[Tuple[str, str], Tuple[int, int]]:
+        counts: Dict[Tuple[str, str], Tuple[int, int]] = {}
+        for pair, users in all_pair_users.items():
+            val_count = sum(1 for uid in users if uid in current_val_users)
+            train_count = len(users) - val_count
+            counts[pair] = (train_count, val_count)
+        return counts
+
+    # Greedy repair: if a required pair is missing in val or train, move a user
+    # carrying it while trying to preserve the requested split size.
+    for _ in range(len(user_ids) * 4):
+        repaired = False
+        counts = pair_side_counts(val_users)
+        missing_in_val = [pair for pair in required_pairs if counts[pair][1] == 0]
+        missing_in_train = [pair for pair in required_pairs if counts[pair][0] == 0]
+        if not missing_in_val and not missing_in_train:
+            break
+
+        for pair in missing_in_val:
+            candidates = sorted(all_pair_users[pair] - val_users)
+            if not candidates:
+                continue
+            candidates.sort(
+                key=lambda uid: (
+                    -len(user_pair_map.get(uid, set()) & set(missing_in_val)),
+                    -len(user_pair_map.get(uid, set()) & required_pairs),
+                    uid,
+                )
+            )
+            val_users.add(candidates[0])
+            repaired = True
+        counts = pair_side_counts(val_users)
+        for pair in missing_in_train:
+            candidates = sorted(all_pair_users[pair] & val_users)
+            if not candidates:
+                continue
+            safe_candidates = [
+                uid for uid in candidates
+                if all(counts[other_pair][1] > 1 for other_pair in user_pair_map.get(uid, set()) & required_pairs)
+            ]
+            pool = safe_candidates or candidates
+            pool.sort(
+                key=lambda uid: (
+                    len(user_pair_map.get(uid, set()) & required_pairs),
+                    uid,
+                )
+            )
+            val_users.remove(pool[0])
+            repaired = True
+
+        while len(val_users) > target_val:
+            counts = pair_side_counts(val_users)
+            removable = [
+                uid for uid in sorted(val_users)
+                if all(counts[pair][1] > 1 for pair in user_pair_map.get(uid, set()) & required_pairs)
+            ]
+            if not removable:
+                break
+            removable.sort(key=lambda uid: len(user_pair_map.get(uid, set()) & required_pairs))
+            val_users.remove(removable[0])
+            repaired = True
+
+        while len(val_users) < target_val:
+            counts = pair_side_counts(val_users)
+            candidates = [
+                uid for uid in user_ids
+                if uid not in val_users
+            ]
+            if not candidates:
+                break
+            candidates.sort(
+                key=lambda uid: (
+                    -sum(1 for pair in user_pair_map.get(uid, set()) & required_pairs if counts[pair][1] == 0),
+                    -len(user_pair_map.get(uid, set()) & required_pairs),
+                    uid,
+                )
+            )
+            val_users.add(candidates[0])
+            repaired = True
+
+        if not repaired:
+            break
+
+    # Final one-sided cleanup for any remaining feasible pairs. This prefers
+    # correctness of sequence coverage over hitting the exact target ratio.
+    final_counts = pair_side_counts(val_users)
+    for pair in sorted(required_pairs):
+        train_count, val_count = final_counts[pair]
+        if val_count == 0 and train_count >= 2:
+            candidates = sorted(all_pair_users[pair] - val_users)
+            if candidates:
+                val_users.add(candidates[0])
+                final_counts = pair_side_counts(val_users)
+        elif train_count == 0 and val_count >= 2:
+            candidates = sorted(all_pair_users[pair] & val_users)
+            if candidates:
+                val_users.remove(candidates[0])
+                final_counts = pair_side_counts(val_users)
+
+    val_mask = df["user_id"].isin(val_users)
+    train_df = df[~val_mask].reset_index(drop=True)
+    val_df = df[val_mask].reset_index(drop=True)
+    return train_df, val_df
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
@@ -1440,32 +1786,6 @@ def print_diagnostics(df: pd.DataFrame) -> None:
     print("Top 15 exercises:")
     for ex, cnt in df.groupby('exercise').size().sort_values(ascending=False).head(15).items():
         print(f"  {ex:28s} {cnt:>7,}")
-
-    print(f"\n{sep}")
-    print("Exercise floor coverage:")
-    counts = df.groupby('exercise').size()
-    floor_target = max(
-        GEN_CONFIG.floor_min_rows,
-        int((GEN_CONFIG.floor_fraction_per_exercise * len(df)) / max(1, len(ALL_EXERCISES))),
-    )
-    pass_cnt = 0
-    for ex in ALL_EXERCISES:
-        c = int(counts.get(ex, 0))
-        ok = c >= floor_target
-        pass_cnt += int(ok)
-        marker = "OK" if ok else "LOW"
-        print(f"  {ex:28s} {c:>7,} ({marker})")
-    print(f"  Floor target/exercise: {floor_target:,}  pass: {pass_cnt}/{len(ALL_EXERCISES)}")
-
-    print(f"\n{sep}")
-    print("Key ordered pair coverage (session-level):")
-    dc = df.copy()
-    dc['date'] = dc['timestamp'].str[:10]
-    n_sessions = max(1, dc.groupby(['user_id', 'date']).ngroups)
-    for a, b in KEY_ORDERED_PAIRS:
-        c = count_ordered_pair_sessions(df, (a, b))
-        pct = 100.0 * c / n_sessions
-        print(f"  {a:18s} -> {b:18s} {c:>6,} sessions ({pct:5.2f}%)")
 
     print(f"\n{sep}")
     print(f"Reps: mean={df['reps'].mean():.1f}  median={df['reps'].median():.0f}  "
@@ -1643,86 +1963,145 @@ def validate_empirical_patterns(df: pd.DataFrame) -> None:
     print("Validation complete.")
 
 
-def run_grid_search(
-    seed: int,
-    n_users: int,
-    n_weeks: int,
-    include_warmups: bool,
-    max_trials: int,
-    out_csv: str,
-):
-    """Run parameter search for generator realism/coverage trade-off."""
-    base_cfg = GeneratorConfig(**vars(GEN_CONFIG))
-    rng = np.random.default_rng(seed + 7000)
+def write_dataset_report(train_df: pd.DataFrame, val_df: pd.DataFrame,
+                         output_path: str, seed: int,
+                         n_users: int, n_weeks: int,
+                         val_ratio: float) -> None:
+    """Write a compact markdown report for coverage handoff."""
+    all_df = pd.concat([train_df, val_df], ignore_index=True)
+    exercise_order = sorted(ORDINAL_MUSCLES.keys()) if ORDINAL_MUSCLES else sorted(all_df["exercise"].unique())
 
-    grid = list(itertools.product(
-        [0.06, 0.10, 0.14],     # pair_block_rate
-        [0.24, 0.28, 0.32],     # cross_overlap_base
-        [0.03, 0.04, 0.05],     # session_penalty_per_exercise
-        [0.90, 1.00, 1.10],     # rir_noise_scale
-    ))
-    rng.shuffle(grid)
-    trials = grid[:min(max_trials, len(grid))]
+    train_counts = train_df.groupby("exercise").size().to_dict()
+    val_counts = val_df.groupby("exercise").size().to_dict()
+    total_counts = all_df.groupby("exercise").size().to_dict()
+    train_seq = _build_sequence_stats(train_df)
+    val_seq = _build_sequence_stats(val_df)
+    all_seq = _build_sequence_stats(all_df)
+    train_seq_map = {
+        (row.src, row.dst): row for row in train_seq.itertuples(index=False)
+    }
+    val_seq_map = {
+        (row.src, row.dst): row for row in val_seq.itertuples(index=False)
+    }
+    all_seq_map = {
+        (row.src, row.dst): row for row in all_seq.itertuples(index=False)
+    }
 
-    records = []
-    print(f"Running grid search: {len(trials)} trials")
+    rir_series = all_df["rir"]
+    lines: List[str] = []
+    lines.append("# Dataset Report")
+    lines.append("")
+    lines.append("## Generation")
+    lines.append(f"- Seed: {seed}")
+    lines.append(f"- Users requested: {n_users}")
+    lines.append(f"- Weeks requested: {n_weeks}")
+    lines.append(f"- Validation ratio (target): {val_ratio:.0%}")
+    lines.append("")
+    lines.append("## Size")
+    lines.append(f"- Train rows: {len(train_df):,}")
+    lines.append(f"- Val rows: {len(val_df):,}")
+    lines.append(f"- Total rows: {len(all_df):,}")
+    lines.append(f"- Train users: {train_df['user_id'].nunique()}")
+    lines.append(f"- Val users: {val_df['user_id'].nunique()}")
+    lines.append(f"- Unique exercises: {all_df['exercise'].nunique()}")
+    lines.append("")
+    lines.append("## Quality")
+    lines.append(f"- RIR mean: {rir_series.mean():.2f}")
+    lines.append(f"- RIR min/max: {int(rir_series.min())}/{int(rir_series.max())}")
+    lines.append(f"- Reps mean: {all_df['reps'].mean():.2f}")
+    lines.append(f"- Weight mean (kg): {all_df['weight_kg'].mean():.2f}")
+    lines.append("")
+    lines.append("## Exercise Coverage")
+    lines.append("| exercise_id | train_sets | val_sets | total_sets |")
+    lines.append("|---|---:|---:|---:|")
+    for ex in exercise_order:
+        t = int(train_counts.get(ex, 0))
+        v = int(val_counts.get(ex, 0))
+        tot = int(total_counts.get(ex, 0))
+        lines.append(f"| {ex} | {t} | {v} | {tot} |")
 
-    for i, (pair_rate, overlap, sess_pen, rir_scale) in enumerate(trials, start=1):
-        set_generator_config(
-            pair_block_rate=pair_rate,
-            cross_overlap_base=overlap,
-            session_penalty_per_exercise=sess_pen,
-            rir_noise_scale=rir_scale,
+    missing_total = [ex for ex in exercise_order if total_counts.get(ex, 0) == 0]
+    lines.append("")
+    lines.append("## Missing Coverage")
+    if missing_total:
+        for ex in missing_total:
+            lines.append(f"- {ex}")
+    else:
+        lines.append("- None")
+
+    lines.append("")
+    lines.append("## Key Sequence Coverage")
+    lines.append("| sequence | train_sessions | val_sessions | total_sessions | train_users | val_users | total_users |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
+    for pair in KEY_SEQUENCE_PAIRS:
+        tr = train_seq_map.get(pair)
+        vr = val_seq_map.get(pair)
+        ar = all_seq_map.get(pair)
+        lines.append(
+            f"| {pair[0]} -> {pair[1]} | "
+            f"{0 if tr is None else int(tr.session_count)} | "
+            f"{0 if vr is None else int(vr.session_count)} | "
+            f"{0 if ar is None else int(ar.session_count)} | "
+            f"{0 if tr is None else int(tr.user_count)} | "
+            f"{0 if vr is None else int(vr.user_count)} | "
+            f"{0 if ar is None else int(ar.user_count)} |"
         )
 
-        trial_seed = seed + i * 17
-        df = generate_dataset(
-            n_users=n_users,
-            n_weeks=n_weeks,
-            seed=trial_seed,
-            include_warmups=include_warmups,
+    lines.append("")
+    lines.append("## Common Sequence Coverage")
+    lines.append("| sequence | train_users | val_users | total_users | train_sessions | val_sessions | total_sessions |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
+    common_pairs = [
+        row for row in all_seq.itertuples(index=False)
+        if int(row.user_count) >= 2
+    ]
+    for row in common_pairs[:40]:
+        pair = (row.src, row.dst)
+        tr = train_seq_map.get(pair)
+        vr = val_seq_map.get(pair)
+        lines.append(
+            f"| {row.src} -> {row.dst} | "
+            f"{0 if tr is None else int(tr.user_count)} | "
+            f"{0 if vr is None else int(vr.user_count)} | "
+            f"{int(row.user_count)} | "
+            f"{0 if tr is None else int(tr.session_count)} | "
+            f"{0 if vr is None else int(vr.session_count)} | "
+            f"{int(row.session_count)} |"
         )
 
-        floor_target = max(
-            GEN_CONFIG.floor_min_rows,
-            int((GEN_CONFIG.floor_fraction_per_exercise * len(df)) / max(1, len(ALL_EXERCISES))),
-        )
-        metrics = compute_quality_metrics(df, floor_target)
-        rec = {
-            "trial": i,
-            "pair_block_rate": pair_rate,
-            "cross_overlap_base": overlap,
-            "session_penalty_per_exercise": sess_pen,
-            "rir_noise_scale": rir_scale,
-            **metrics,
-        }
-        records.append(rec)
-        print(f"  Trial {i:02d}: score={metrics['score']:.3f}, rows={int(metrics['rows']):,}")
+    rare_pairs = [
+        row for row in all_seq.itertuples(index=False)
+        if int(row.user_count) < 2
+    ]
+    lines.append("")
+    lines.append("## Rare Sequences (<2 users)")
+    if rare_pairs:
+        for row in rare_pairs[:40]:
+            lines.append(
+                f"- {row.src} -> {row.dst}: {int(row.user_count)} user, {int(row.session_count)} session(s)"
+            )
+        if len(rare_pairs) > 40:
+            lines.append(f"- ... plus {len(rare_pairs) - 40} more")
+    else:
+        lines.append("- None")
 
-    out = pd.DataFrame(records).sort_values("score", ascending=False).reset_index(drop=True)
-    out.to_csv(out_csv, index=False)
+    missing_bidirectional = []
+    for row in common_pairs:
+        pair = (row.src, row.dst)
+        tr = train_seq_map.get(pair)
+        vr = val_seq_map.get(pair)
+        if tr is None or vr is None:
+            missing_bidirectional.append(pair)
+    lines.append("")
+    lines.append("## Split Sequence Audit")
+    if missing_bidirectional:
+        for src, dst in missing_bidirectional:
+            lines.append(f"- Missing on one side despite >=2 users overall: {src} -> {dst}")
+    else:
+        lines.append("- All same-session ordered sequences with >=2 users are present in both train and val.")
 
-    best = out.iloc[0].to_dict()
-    set_generator_config(
-        pair_block_rate=float(best["pair_block_rate"]),
-        cross_overlap_base=float(best["cross_overlap_base"]),
-        session_penalty_per_exercise=float(best["session_penalty_per_exercise"]),
-        rir_noise_scale=float(best["rir_noise_scale"]),
-    )
-
-    print("\nBest config from grid search:")
-    print(f"  pair_block_rate={GEN_CONFIG.pair_block_rate:.3f}")
-    print(f"  cross_overlap_base={GEN_CONFIG.cross_overlap_base:.3f}")
-    print(f"  session_penalty_per_exercise={GEN_CONFIG.session_penalty_per_exercise:.3f}")
-    print(f"  rir_noise_scale={GEN_CONFIG.rir_noise_scale:.3f}")
-    print(f"Saved full results to: {out_csv}")
-
-    # Restore immutable defaults for fields not optimized.
-    set_generator_config(
-        max_session_penalty=base_cfg.max_session_penalty,
-        floor_fraction_per_exercise=base_cfg.floor_fraction_per_exercise,
-        floor_min_rows=base_cfg.floor_min_rows,
-    )
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
@@ -1734,100 +2113,124 @@ def main():
         description="DeepGain v3 — Empirical, MPC-Free, RIR-Based Data Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  Quick test:      python generate_training_data.py --num_users 10 --weeks 4
-  Medium:          python generate_training_data.py --num_users 100 --weeks 16
-  Full year:       python generate_training_data.py --num_users 200 --weeks 52
-  Large:           python generate_training_data.py --num_users 500 --weeks 52
+  Mini (MVP, 3 exercises):
+      python generate_training_data.py --mini
+  Quick test:
+      python generate_training_data.py --num_users 10 --weeks 4
+  Full year + split:
+      python generate_training_data.py --num_users 208 --weeks 65
         """)
-    p.add_argument("--num_users", type=int, default=200)
-    p.add_argument("--weeks", type=int, default=52)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--output", type=str, default="training_data.csv")
-    p.add_argument("--no_warmups", action="store_true")
-    p.add_argument("--quiet", action="store_true")
-    p.add_argument("--target_rows", type=int, default=0,
-                   help="Generate until at least this many rows (0 = disabled).")
-    p.add_argument("--floor_min_rows", type=int, default=300,
-                   help="Minimum rows per exercise after floor balancing.")
-    p.add_argument("--pair_block_rate", type=float, default=0.12,
-                   help="Probability of injecting one key cross-muscle pair block per session.")
-    p.add_argument("--cross_overlap_base", type=float, default=0.28,
-                   help="Base cross-exercise penalty multiplier at full overlap.")
-    p.add_argument("--session_penalty_per_exercise", type=float, default=0.04,
-                   help="Extra fatigue penalty per exercise after the 3rd one.")
-    p.add_argument("--rir_noise_scale", type=float, default=1.0,
-                   help="Global scale for RIR-reporting noise SD.")
-    p.add_argument("--grid_search", action="store_true",
-                   help="Run parameter grid search and print best config.")
-    p.add_argument("--grid_trials", type=int, default=18,
-                   help="Max grid trials to evaluate when --grid_search is set.")
-    p.add_argument("--grid_users", type=int, default=60,
-                   help="Users per trial for grid search.")
-    p.add_argument("--grid_weeks", type=int, default=10,
-                   help="Weeks per trial for grid search.")
-    p.add_argument("--grid_output", type=str, default="generator_grid_results.csv",
-                   help="CSV output for grid-search trial metrics.")
+    p.add_argument("--num_users",    type=int,   default=208)
+    p.add_argument("--weeks",        type=int,   default=65)
+    p.add_argument("--seed",         type=int,   default=42)
+    p.add_argument("--output",       type=str,   default="training_data.csv",
+                   help="Legacy single-file output (ignored when --split is set).")
+    p.add_argument("--train_output", type=str,   default="training_data_train.csv")
+    p.add_argument("--val_output",   type=str,   default="training_data_val.csv")
+    p.add_argument("--val_ratio",    type=float, default=0.20,
+                   help="Fraction of users in val set (default 0.20).")
+    p.add_argument("--yaml",         type=str,   default=None,
+                   help="Path to exercise_muscle_order.yaml "
+                        "(default: same directory as this script).")
+    p.add_argument("--mini",         action="store_true",
+                   help="Mini-dataset MVP: 5 users × 4 weeks, YAML exercises only. "
+                        "Useful for Osoba B early pipeline test.")
+    p.add_argument("--no_warmups",   action="store_true")
+    p.add_argument("--quiet",        action="store_true")
+    p.add_argument("--split",        action="store_true",
+                   help="Write separate train/val CSV files (default when --mini).")
+    p.add_argument("--report_output", type=str, default="dataset_report.md",
+                   help="Path for autogenerated markdown coverage report.")
+    p.add_argument("--no_report", action="store_true",
+                   help="Disable autogenerated markdown coverage report.")
     args = p.parse_args()
 
-    set_generator_config(
-        pair_block_rate=float(np.clip(args.pair_block_rate, 0.0, 1.0)),
-        cross_overlap_base=max(0.0, float(args.cross_overlap_base)),
-        session_penalty_per_exercise=max(0.0, float(args.session_penalty_per_exercise)),
-        rir_noise_scale=max(0.1, float(args.rir_noise_scale)),
-        floor_min_rows=max(0, int(args.floor_min_rows)),
-    )
-
-    if args.grid_search:
-        run_grid_search(
-            seed=args.seed,
-            n_users=max(8, args.grid_users),
-            n_weeks=max(2, args.grid_weeks),
-            include_warmups=not args.no_warmups,
-            max_trials=max(1, args.grid_trials),
-            out_csv=args.grid_output,
-        )
+    split = args.split or args.mini
 
     print("=" * 60)
     print("DeepGain v3 — Empirical, MPC-Free, RIR-Based Generator")
+    if args.mini:
+        print("  *** MINI / MVP MODE (3 exercises, 5 users, 4 weeks) ***")
     print("=" * 60)
-    print(f"  Scientific sources:  57 papers")
-    print(f"  Exercises:           {len(EXERCISE_MUSCLES)}")
-    print(f"  Muscle groups:       {len(ALL_MUSCLES)}")
-    print(f"  Workout templates:   {len(TEMPLATES)}")
-    print(f"  Weekly schedules:    {len(SCHEDULES)}")
-    print(f"  Users:               {args.num_users:,}")
-    print(f"  Weeks:               {args.weeks}")
-    if args.target_rows > 0:
-        print(f"  Target rows:         >={args.target_rows:,}")
-    print(f"  Pair block rate:     {GEN_CONFIG.pair_block_rate:.2f}")
-    print(f"  Floor min/exercise:  {GEN_CONFIG.floor_min_rows:,}")
-    print(f"  Effort metric:       RIR (0-5, integer)")
-    print(f"  Hidden state:        NONE (pure lookup tables)")
+    print(f"  Users:        {min(args.num_users, 5) if args.mini else args.num_users:,}")
+    print(f"  Weeks:        {min(args.weeks, 4) if args.mini else args.weeks}")
+    print(f"  Val ratio:    {args.val_ratio:.0%}")
+    print(f"  Output mode:  {'train+val CSV' if split else 'single CSV'}")
     print()
 
-    df = generate_dataset(
-        args.num_users,
-        args.weeks,
-        args.seed,
+    train_df, val_df = generate_dataset(
+        n_users=args.num_users,
+        n_weeks=args.weeks,
+        seed=args.seed,
         include_warmups=not args.no_warmups,
-        target_rows=(args.target_rows if args.target_rows > 0 else None),
-        floor_min_rows=max(0, args.floor_min_rows),
+        yaml_path=args.yaml,
+        mini=args.mini,
+        val_ratio=args.val_ratio,
     )
 
-    if len(df) == 0:
+    if len(train_df) == 0:
         print("ERROR: No data generated!")
         sys.exit(1)
 
     expected = {"user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"}
-    assert set(df.columns) == expected, f"Bad columns: {set(df.columns)}"
+    assert set(train_df.columns) == expected, f"Bad columns: {set(train_df.columns)}"
 
-    if not args.quiet:
-        print_diagnostics(df)
-        validate_empirical_patterns(df)
+    df_all = pd.concat([train_df, val_df]).sort_values(["user_id", "timestamp"])
 
-    df.to_csv(args.output, index=False)
-    size_mb = os.path.getsize(args.output) / 1024 / 1024
-    print(f"\nSaved {len(df):,} rows to {args.output} ({size_mb:.1f} MB)")
+    if not args.quiet and not args.mini:
+        print_diagnostics(df_all)
+        validate_empirical_patterns(df_all)
+    elif args.mini and not args.quiet:
+        _print_mini_diagnostics(train_df, val_df)
+
+    if split:
+        train_df.to_csv(args.train_output, index=False)
+        val_df.to_csv(args.val_output, index=False)
+        t_mb = os.path.getsize(args.train_output) / 1024 / 1024
+        v_mb = os.path.getsize(args.val_output)   / 1024 / 1024
+        print(f"\nSaved train: {len(train_df):,} rows -> {args.train_output} ({t_mb:.2f} MB)")
+        print(f"Saved val:   {len(val_df):,} rows -> {args.val_output} ({v_mb:.2f} MB)")
+        print(f"Train users: {train_df['user_id'].nunique()}  "
+              f"Val users: {val_df['user_id'].nunique()}")
+    else:
+        df_all.to_csv(args.output, index=False)
+        size_mb = os.path.getsize(args.output) / 1024 / 1024
+        print(f"\nSaved {len(df_all):,} rows to {args.output} ({size_mb:.1f} MB)")
+
+    if not args.no_report:
+        write_dataset_report(
+            train_df=train_df,
+            val_df=val_df,
+            output_path=args.report_output,
+            seed=args.seed,
+            n_users=min(args.num_users, 5) if args.mini else args.num_users,
+            n_weeks=min(args.weeks, 4) if args.mini else args.weeks,
+            val_ratio=args.val_ratio,
+        )
+        print(f"Saved report: {args.report_output}")
+
+
+def _print_mini_diagnostics(train_df: pd.DataFrame, val_df: pd.DataFrame) -> None:
+    """Compact diagnostic for --mini mode."""
+    df = pd.concat([train_df, val_df])
+    sep = "-" * 50
+    print(f"\n{sep}")
+    print("MINI-DATASET DIAGNOSTIC")
+    print(sep)
+    print(f"  Total sets:  {len(df):,}   "
+          f"(train {len(train_df):,} / val {len(val_df):,})")
+    print(f"  Users:       {df['user_id'].nunique()}")
+    print(f"  Exercises:   {sorted(df['exercise'].unique())}")
+    print(f"  Date range:  {df['timestamp'].min()[:10]} to {df['timestamp'].max()[:10]}")
+    print("\n  Sets per exercise:")
+    for ex, cnt in df.groupby('exercise').size().items():
+        print(f"    {ex:<30} {cnt:>5}")
+    print("\n  RIR distribution:")
+    for r in range(6):
+        c = (df['rir'] == r).sum()
+        print(f"    RIR {r}: {c:>4} ({c/len(df)*100:4.1f}%)")
+    print(f"\n  Ordinal muscles loaded: {list(ORDINAL_MUSCLES.keys())}")
+    print(sep)
 
 
 if __name__ == "__main__":
