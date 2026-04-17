@@ -132,7 +132,15 @@ Pełne wyniki (posortowane od najgorszych, probe: 80kg × 8 reps × RIR 2):
 
 - [ ] **bird_dog i lat_pulldown** — ordering accuracy 0% i 50%. Słaby sygnał w datasecie dla tych ćwiczeń. Warto sprawdzić czy sekwencje gdzie bird_dog sąsiaduje z innymi ćwiczeniami core/glutes są wystarczająco liczne.
 
-- [ ] **Sekwencje cross-muscle** — model collapse (bench press = chest only) wynika z braku wyraźnego sygnału że zmęczone triceps po bench psują skull crushery. Dataset powinien mieć więcej sesji: bench → skull crusher → ohp w tej samej sesji.
+- [ ] **Sekwencje cross-muscle** — model collapse (bench press = chest only) wynika z braku wyraźnego sygnału że zmęczone triceps po bench psują skull crushery. Dataset powinien mieć więcej sesji gdzie ten sam mięsień jest wtórny w pierwszym ćwiczeniu i primary w kolejnym. Przykłady par:
+  - `bench_press → skull_crusher` (triceps wtórny → primary)
+  - `bench_press → ohp` (anterior_delts wtórny → primary)
+  - `rdl → leg_curl` (hamstrings wtórny → primary)
+  - `pendlay_row → lat_pulldown` (lats wtórny → primary)
+  - `squat → leg_press` (glutes wtórny → reinforcement)
+  - `deadlift → rdl` (hamstrings wtórny → primary)
+  
+  Bez takich sekwencji model nie ma sygnału że zmęczenie mięśnia wtórnego przekłada się na gorsze wyniki w kolejnym ćwiczeniu — i uczy się ignorować mięśnie wtórne.
 
 ## Do zrobienia (Michal)
 
