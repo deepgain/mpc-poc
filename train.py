@@ -30,7 +30,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 32
 HIDDEN_DIM = 256
 LR = 1e-3
-EPOCHS = 50
+EPOCHS = 10
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -175,7 +175,7 @@ def _load_split(path):
 print("Loading data...")
 # Per-user 70/30 split — preserves complete user sequences in val (no MPC state leakage).
 # Falls back to pre-split files if full CSV not available.
-_FULL_CSV = "training_data_michal_full.csv"
+_FULL_CSV = "training_data_full_generated.csv"
 _SPLIT_CANDIDATES = [
     ("training_data_train.csv", "training_data_val.csv"),
     ("generated_datasets/baseline_main/training_data_train.csv",

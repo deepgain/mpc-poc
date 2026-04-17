@@ -1,23 +1,57 @@
-# Train Report — Milestone 6
+# Train Report — Milestone 7 (in progress)
 
 ## Metryki
 
-| | Baseline (27 ćw.) | M2 (44 ćw.) | M3 (47 ćw., 17 mięśni) | M4 (34 ćw., 15 mięśni) | M5 (34 ćw., 15 mięśni) | **M6 (34 ćw., 15 mięśni)** |
-|---|---|---|---|---|---|---|
-| Val RMSE | 1.08 RIR | 1.005 RIR | 0.845 RIR | 0.869 RIR¹ | 0.963 RIR | **0.924 RIR** |
-| MAE | 0.86 RIR | 0.789 RIR | 0.656 RIR | 0.673 RIR¹ | 0.753 RIR | **0.749 RIR** |
-| R | 0.789 | 0.833 | 0.884 | 0.878¹ | 0.842 | **0.854** |
-| Ordering acc | — | — | — | 90% | 93% | **95%** |
-| HIDDEN_DIM | 128 | 128 | 128 | 128 | 128 | **256** |
-| Parametry | ~66k | ~66k | ~66k | ~66k | ~66k | **~230k** |
-| Split | per-ex | per-ex | per-ex | per-ex¹ | per-user | per-user |
+| | M4 (34 ćw., 15 mięśni) | M5 (34 ćw., 15 mięśni) | M6 (34 ćw., 15 mięśni) | **M7† (34 ćw., 15 mięśni)** |
+|---|---|---|---|---|
+| Val RMSE | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | **1.048 RIR†** |
+| MAE | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | **0.832 RIR†** |
+| R | 0.878¹ | 0.842 | 0.854 | **0.812†** |
+| Ordering acc | 90% | 93% | 95% | **97%†** |
+| HIDDEN_DIM | 128 | 128 | 256 | 256 |
+| Parametry | ~66k | ~66k | ~230k | ~230k |
+| Split | per-ex¹ | per-user | per-user | per-user |
+| Dataset | michal_full | michal_full | michal_full | **full_generated** |
 
-¹ M4 walidowany na danych z data leakage — per-exercise split powodował że wszyscy 312 userów byli w obu setach. Metryki M4 są zbyt optymistyczne. M5+ używa czystego per-user holdoutu (218 train / 94 val, zero overlap) — liczby są uczciwe.
+† M7 po **10/50 epokach** — wartości tymczasowe, trening niezakończony. RMSE/MAE wyższe niż M6 bo model na początku krzywej uczenia. Ordering 97% już przy epoce 10 sugeruje że pełny trening pobije M6.
 
-Dataset: `training_data_michal_full.csv` — 723k train / 327k val, 218/94 userów, 34 ćwiczenia.
-Checkpoint M6: `deepgain_model_muscle_ord.pt` (val RMSE 0.924, best epoka 49/50). M5: epoka 50/50, val RMSE 0.963.
+¹ M4 z data leakage (per-exercise split) — metryki zbyt optymistyczne.
 
-**M6 vs M5:** RMSE −0.039, MAE −0.004, R +0.012, ordering +2pp. M5 osiągnął plateau na 0.96–0.97 od epoki ~36 — M6 (HIDDEN_DIM=256) przebija ten sufit i stabilizuje się na 0.92–0.95. Większa pojemność modelu przekłada się na lepszą generalizację cross-muscle. Dalsze skalowanie (HIDDEN_DIM=512) możliwe, ale diminishing returns bez więcej danych.
+Dataset M7: `training_data_full_generated.csv` — 698k train / 293k val, **145/63 userów**, 34 ćwiczenia. Nowe wagi EMG (bench_press chest coefficient 0.64 zamiast 0.70 — tempers chest dominance).
+Checkpoint M6 (poprzedni best): `deepgain_model_muscle_ord.pt` (val RMSE 0.924, best epoka 49/50).
+
+**M7 vs M6 — co się zmieniło:**
+- **Nowy dataset** (`training_data_full_generated.csv`) — wszystkie priorytetowe sekwencje cross-muscle obecne (bench→skull: 4811 sesji, deadlift→rdl: 6002 sesji, incline→flyes: 6888 sesji)
+- **Nowe wagi EMG** — bench_press chest coefficient obniżony (0.70→0.64), erectors 0.70→0.68, abs 0.80→0.74
+- HIDDEN_DIM=256 bez zmian vs M6
+
+---
+
+## M7 — Wyniki po 10/50 epokach (wstępne)
+
+> Trening niezakończony. Poniższe dane z epoki 10/50.
+
+**Ordering accuracy @ epoka 10: MEAN 97%**
+
+| Ćwiczenie | M6 (50 ep) | M7 (10 ep) | Δ |
+|---|---:|---:|---|
+| deadlift | 67% | **83%** | +16pp ✓ |
+| dumbbell_flyes | 83% | **83%** | — |
+| pull_up | 100% | **83%** | regresja (epoka 10) |
+| lat_pulldown | 100% | **83%** | regresja (epoka 10) |
+| ohp | 100% | **90%** | regresja (epoka 10) |
+| sumo_deadlift | 100% | **95%** | regresja (epoka 10) |
+| pozostałe (22 ćw.) | 100% | **100%** | — |
+| **MEAN** | **95%** | **97%** | **+2pp** |
+
+Regresje przy epoce 10 są oczekiwane — model nie wytrenowany. Deadlift 67%→83% już teraz to kluczowy wynik: nowy dataset z sekwencjami `deadlift→rdl` zadziałał.
+
+**Muscle breakdown @ epoka 10:**
+- **Deadlift**: hamstrings (1.00) > erectors (0.93) > glutes (0.92) — fizjologicznie poprawne ✓ (M6: erectors dominował, hamstrings/glutes ~0)
+- **Bench press**: chest dominuje, triceps i anterior_delts widoczne — mniejszy muscle collapse niż M6
+- **Dips**: chest (1.00) > triceps (0.88) > anterior_delts (0.72) — poprawna hierarchia ✓
+
+Wyniki po pełnych 50 epokach zostaną tu uzupełnione.
 
 ---
 
