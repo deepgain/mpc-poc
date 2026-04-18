@@ -121,7 +121,7 @@ import pathlib
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -290,7 +290,7 @@ EXERCISE_MUSCLES: Dict[str, Dict[str, float]] = {
     "leg_curl":         {"hamstrings": 0.85},
     "leg_extension":    {"quads": 0.85},
     "pendlay_row":      {"rear_delts": 1.00, "rhomboids": 0.640147, "erectors": 0.588446, "lats": 0.529988},
-    "pull_up":          {"lats": 0.82, "rear_delts": 0.72, "rhomboids": 0.52, "biceps": 0.45},
+    "pull_up":          {"lats": 1.00, "biceps": 0.666667, "rhomboids": 0.500000},
     "lat_pulldown":     {"lats": 0.78, "rhomboids": 0.52, "rear_delts": 0.40, "biceps": 0.35},
     "reverse_fly":      {"rear_delts": 0.88, "lateral_delts": 0.65},
     "seal_row":         {"rear_delts": 1.00, "rhomboids": 0.713324, "lats": 0.399731, "erectors": 0.216904},
@@ -966,6 +966,18 @@ TEMPLATES: Dict[str, List[WorkoutEntry]] = {
         ("farmers_walk", 0.72, 3, 2, 0.8), ("suitcase_carry", 0.66, 3, 2, 0.8),
         ("leg_raises", 0.68, 3, 2, 0.6),
     ],
+    # Calibration template: expose Spoto earlier with mixed non-press context.
+    "spoto_calibration_day": [
+        ("spoto_press", 0.78, 4, 2, 1.1), ("pendlay_row", 0.72, 3, 2, 1.0),
+        ("lat_pulldown", 0.70, 3, 2, 0.8), ("reverse_fly", 0.62, 2, 3, 0.5),
+        ("skull_crusher", 0.62, 2, 2, 0.6),
+    ],
+    # Calibration template: make machine chest appear early in-session.
+    "machine_chest_calibration_day": [
+        ("chest_press_machine", 0.72, 4, 2, 0.9), ("seal_row", 0.70, 3, 2, 0.9),
+        ("pull_up", 0.72, 3, 2, 0.9), ("ohp", 0.68, 2, 2, 0.9),
+        ("plank", 0.60, 2, 4, 0.5),
+    ],
 }
 
 
@@ -1259,6 +1271,15 @@ def simulate_workout(rng: np.random.Generator, user: UserProfile,
                      ) -> List[Dict]:
     """Generate all sets for one workout session."""
     _templates = templates if templates is not None else TEMPLATES
+
+    # Controlled context diversification for chest auxiliaries.
+    # Keeps powerlifting-first templates, but adds cleaner contexts where
+    # Spoto/machine chest are not always preceded by another press.
+    if template_name == "bench_volume_day" and rng.random() < 0.12:
+        template_name = "spoto_calibration_day"
+    elif template_name in {"upper_support_day", "bench_intensity_day"} and rng.random() < 0.12:
+        template_name = "machine_chest_calibration_day"
+
     template = _templates[template_name]
     rows: List[Dict] = []
     t = start_time
@@ -1476,6 +1497,7 @@ def generate_dataset(
     rng = np.random.default_rng(seed)
     start_date = datetime(2024, 1, 1)
     all_rows: List[Dict] = []
+    user_profiles: Dict[str, Dict[str, str]] = {}
     report_every = max(1, n_users // 20)
 
     templates = MINI_TEMPLATES if mini else None
@@ -1487,6 +1509,11 @@ def generate_dataset(
                   end="", flush=True)
         user_id = f"user_{i:05d}"
         user = generate_user(rng, user_id)
+        user_profiles[user_id] = {
+            "training_level": user.training_level,
+            "sex": user.sex,
+            "split_preference": str(user.split_preference),
+        }
         rows = simulate_program(
             rng, user, n_weeks, start_date, include_warmups,
             templates=templates, fixed_schedule=fixed_schedule,
@@ -1506,6 +1533,7 @@ def generate_dataset(
         df=df,
         val_ratio=val_ratio,
         seed=seed,
+        user_profiles=user_profiles,
     )
     return train_df, val_df
 
@@ -1603,10 +1631,70 @@ def _build_user_sequence_map(df: pd.DataFrame) -> Dict[str, set[Tuple[str, str]]
     return user_map
 
 
+def _initial_stratified_val_users(
+    user_ids: List[str],
+    target_val: int,
+    seed: int,
+    user_profiles: Optional[Dict[str, Dict[str, str]]] = None,
+) -> Set[str]:
+    """Build initial validation users with lightweight profile stratification.
+
+    Buckets are based on training level, sex and split preference so validation
+    receives better representation of user archetypes before sequence repair.
+    """
+    if not user_ids:
+        return set()
+
+    if user_profiles is None:
+        return {uid for uid in user_ids if _user_in_val(uid, target_val / max(len(user_ids), 1), seed)}
+
+    ratio = target_val / max(len(user_ids), 1)
+    by_bucket: Dict[Tuple[str, str, str], List[str]] = {}
+    for uid in user_ids:
+        p = user_profiles.get(uid, {})
+        key = (
+            p.get("training_level", "unknown"),
+            p.get("sex", "unknown"),
+            p.get("split_preference", "unknown"),
+        )
+        by_bucket.setdefault(key, []).append(uid)
+
+    val_users: Set[str] = set()
+    for members in by_bucket.values():
+        members = sorted(members)
+        target_bucket = int(round(len(members) * ratio))
+        if len(members) >= 3:
+            target_bucket = max(1, target_bucket)
+        target_bucket = min(target_bucket, len(members))
+        seeded = [uid for uid in members if _user_in_val(uid, ratio, seed)]
+        picks = sorted(seeded)[:target_bucket]
+        if len(picks) < target_bucket:
+            for uid in members:
+                if uid in picks:
+                    continue
+                picks.append(uid)
+                if len(picks) >= target_bucket:
+                    break
+        val_users.update(picks)
+
+    if len(val_users) > target_val:
+        extras = sorted(val_users)
+        for uid in extras[target_val:]:
+            val_users.remove(uid)
+    while len(val_users) < target_val:
+        for uid in user_ids:
+            if uid not in val_users:
+                val_users.add(uid)
+                if len(val_users) >= target_val:
+                    break
+    return val_users
+
+
 def _split_dataset_by_users_with_sequence_coverage(
     df: pd.DataFrame,
     val_ratio: float,
     seed: int,
+    user_profiles: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """User-level split with sequence coverage repair.
 
@@ -1632,10 +1720,12 @@ def _split_dataset_by_users_with_sequence_coverage(
         if len(users) >= 2
     }
 
-    val_users = {
-        uid for uid in user_ids
-        if _user_in_val(uid, val_ratio, seed)
-    }
+    val_users = _initial_stratified_val_users(
+        user_ids=user_ids,
+        target_val=target_val,
+        seed=seed,
+        user_profiles=user_profiles,
+    )
 
     if len(val_users) == 0:
         val_users.add(user_ids[0])

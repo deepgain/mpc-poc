@@ -266,9 +266,9 @@ exercises:
     name_en: "Pull-ups"
     name_pl: "Podciaganie"
     category: compound
-    primary_muscles: [rear_delts, lats]
-    secondary_muscles: [rhomboids, biceps]
-    tertiary_muscles: []
+    primary_muscles: [lats]          # Youdas 2010: 117–130% MVIC — dominujace
+    secondary_muscles: [biceps]      # Youdas 2010: 78–96% MVIC
+    tertiary_muscles: [rhomboids]    # Dickie 2016: middle trap 60.1% MVIC (pronated peak)
 
   lat_pulldown:
     csv_title: "Lat Pulldown"
