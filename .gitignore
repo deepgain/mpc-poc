@@ -9,3 +9,4 @@ chart_*.png
 .claude/
 *.pt
 !deepgain_model_muscle_ord.pt
+!deepgain_model_best.pt
