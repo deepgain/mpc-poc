@@ -27,10 +27,10 @@ else:
 print(f"Device: {DEVICE}")
 
 # ─── Hyperparameters ───
-EMBED_DIM = 32
-HIDDEN_DIM = 256
+EMBED_DIM = 64
+HIDDEN_DIM = 512
 LR = 1e-3
-EPOCHS = 150
+EPOCHS = 50
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
