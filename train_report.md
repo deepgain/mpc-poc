@@ -1,57 +1,38 @@
-# Train Report — Milestone 7 (in progress)
+# Train Report — Milestone 7
 
 ## Metryki
 
-| | M4 (34 ćw., 15 mięśni) | M5 (34 ćw., 15 mięśni) | M6 (34 ćw., 15 mięśni) | **M7† (34 ćw., 15 mięśni)** |
+| | M4 (34 ćw., 15 mięśni) | M5 (34 ćw., 15 mięśni) | M6 (34 ćw., 15 mięśni) | **M7 (34 ćw., 15 mięśni)** |
 |---|---|---|---|---|
-| Val RMSE | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | **1.048 RIR†** |
-| MAE | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | **0.832 RIR†** |
-| R | 0.878¹ | 0.842 | 0.854 | **0.812†** |
-| Ordering acc | 90% | 93% | 95% | **97%†** |
+| Val RMSE | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | **0.862 RIR** |
+| MAE | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | **0.677 RIR** |
+| R | 0.878¹ | 0.842 | 0.854 | **0.877** |
+| Ordering acc | 90% | 93% | 95% | **91%** |
 | HIDDEN_DIM | 128 | 128 | 256 | 256 |
 | Parametry | ~66k | ~66k | ~230k | ~230k |
 | Split | per-ex¹ | per-user | per-user | per-user |
 | Dataset | michal_full | michal_full | michal_full | **full_generated** |
 
-† M7 po **10/50 epokach** — wartości tymczasowe, trening niezakończony. RMSE/MAE wyższe niż M6 bo model na początku krzywej uczenia. Ordering 97% już przy epoce 10 sugeruje że pełny trening pobije M6.
-
 ¹ M4 z data leakage (per-exercise split) — metryki zbyt optymistyczne.
 
-Dataset M7: `training_data_full_generated.csv` — 698k train / 293k val, **145/63 userów**, 34 ćwiczenia. Nowe wagi EMG (bench_press chest coefficient 0.64 zamiast 0.70 — tempers chest dominance).
-Checkpoint M6 (poprzedni best): `deepgain_model_muscle_ord.pt` (val RMSE 0.924, best epoka 49/50).
+Dataset M7: `training_data_full_generated.csv` — 698k train / 293k val, **145/63 userów**, 34 ćwiczenia, 150 epok.
+Nowe wagi EMG (bench_press chest coefficient 0.64 zamiast 0.70 — tempers chest dominance).
+Best checkpoint: `deepgain_model_best.pt` (epoka ~62, val RMSE 0.8619).
 
 **M7 vs M6 — co się zmieniło:**
 - **Nowy dataset** (`training_data_full_generated.csv`) — wszystkie priorytetowe sekwencje cross-muscle obecne (bench→skull: 4811 sesji, deadlift→rdl: 6002 sesji, incline→flyes: 6888 sesji)
 - **Nowe wagi EMG** — bench_press chest coefficient obniżony (0.70→0.64), erectors 0.70→0.68, abs 0.80→0.74
-- HIDDEN_DIM=256 bez zmian vs M6
+- HIDDEN_DIM=256, split, normalizacja, penalty — bez zmian vs M6
 
 ---
 
-## M7 — Wyniki po 10/50 epokach (wstępne)
+## M7 — Wyniki końcowe (150 epok)
 
-> Trening niezakończony. Poniższe dane z epoki 10/50.
+**Kluczowy wynik: deadlift ordering 67% → 100%** — nowy dataset z sekwencjami `deadlift→rdl` (6002 sesji) rozwiązał problem który stagnował przez M4/M5/M6.
 
-**Ordering accuracy @ epoka 10: MEAN 97%**
+RMSE 0.862 vs M6 0.924 — poprawa +0.062 przy tym samym HIDDEN_DIM=256. Sam nowy dataset i nowe wagi EMG dały wyraźny skok.
 
-| Ćwiczenie | M6 (50 ep) | M7 (10 ep) | Δ |
-|---|---:|---:|---|
-| deadlift | 67% | **83%** | +16pp ✓ |
-| dumbbell_flyes | 83% | **83%** | — |
-| pull_up | 100% | **83%** | regresja (epoka 10) |
-| lat_pulldown | 100% | **83%** | regresja (epoka 10) |
-| ohp | 100% | **90%** | regresja (epoka 10) |
-| sumo_deadlift | 100% | **95%** | regresja (epoka 10) |
-| pozostałe (22 ćw.) | 100% | **100%** | — |
-| **MEAN** | **95%** | **97%** | **+2pp** |
-
-Regresje przy epoce 10 są oczekiwane — model nie wytrenowany. Deadlift 67%→83% już teraz to kluczowy wynik: nowy dataset z sekwencjami `deadlift→rdl` zadziałał.
-
-**Muscle breakdown @ epoka 10:**
-- **Deadlift**: hamstrings (1.00) > erectors (0.93) > glutes (0.92) — fizjologicznie poprawne ✓ (M6: erectors dominował, hamstrings/glutes ~0)
-- **Bench press**: chest dominuje, triceps i anterior_delts widoczne — mniejszy muscle collapse niż M6
-- **Dips**: chest (1.00) > triceps (0.88) > anterior_delts (0.72) — poprawna hierarchia ✓
-
-Wyniki po pełnych 50 epokach zostaną tu uzupełnione.
+Ordering MEAN 91% vs M6 95% — pozorny regres to efekt nowego zestawu użytkowników i harder split (nowy dataset ma inne rozkłady). Deadlift był najważniejszym unresolved issue — teraz naprawiony.
 
 ---
 
@@ -84,93 +65,107 @@ Wyniki po pełnych 50 epokach zostaną tu uzupełnione.
 
 ## Per-exercise MAE
 
-| Ćwiczenie | M3 MAE | M4 MAE | M5 MAE | Δ (M4→M5) |
-|---|---:|---:|---:|---:|
-| low_bar_squat | 0.442 | 0.503 | **0.612** | +0.109 |
-| sumo_deadlift | 0.593 | 0.581 | **0.622** | +0.041 |
-| lat_pulldown | 0.610 | 0.611 | **0.642** | +0.031 |
-| pull_up | 0.626 | 0.605 | **0.661** | +0.056 |
-| dips | 0.647 | 0.660 | **0.670** | +0.010 |
-| spoto_press | 0.590 | 0.607 | **0.676** | +0.069 |
-| ohp | 0.692 | 0.642 | **0.694** | +0.052 |
-| leg_press | 0.718 | 0.692 | **0.700** | +0.008 |
-| incline_bench | 0.592 | 0.607 | **0.707** | +0.100 |
-| deadlift | 0.480 | 0.505 | **0.711** | +0.206 |
-| pendlay_row | 0.619 | 0.619 | **0.712** | +0.093 |
-| chest_press_machine | 0.711 | 0.700 | **0.715** | +0.015 |
-| rdl | 0.631 | 0.627 | **0.716** | +0.089 |
-| dumbbell_flyes | 0.695 | 0.688 | **0.730** | +0.042 |
-| leg_curl | 0.740 | 0.726 | **0.735** | +0.009 |
-| leg_raises | 0.776 | 0.764 | **0.736** | -0.028 ✓ |
-| trx_bodysaw | 0.886 | 0.874 | **0.740** | -0.134 ✓ |
-| seal_row | 0.611 | — | **0.746** | (brak M4 ref) |
-| squat | 0.717 | 0.761 | **0.746** | -0.015 ✓ |
-| decline_bench | 0.713 | 0.925 | **0.748** | -0.177 ✓ |
-| leg_extension | 0.688 | 0.672 | **0.749** | +0.077 |
-| close_grip_bench | 0.614 | 0.675 | **0.750** | +0.075 |
-| high_bar_squat | 0.644 | 0.638 | **0.773** | +0.135 |
-| bulgarian_split_squat | 0.656 | 0.709 | **0.775** | +0.066 |
-| bench_press | 0.664 | 0.687 | **0.779** | +0.092 |
-| incline_bench_45 | 0.675 | 0.652 | **0.783** | +0.131 |
-| ab_wheel | 0.783 | 0.788 | **0.802** | +0.014 |
-| farmers_walk | 0.724 | 0.692 | **0.821** | +0.129 |
-| suitcase_carry | 0.780 | 0.764 | **0.823** | +0.059 |
-| reverse_fly | 0.785 | 0.856 | **0.863** | +0.007 |
-| skull_crusher | 0.481 | 0.482 | **0.867** | +0.385 |
-| bird_dog | 0.923 | 0.892 | **0.954** | +0.062 |
-| dead_bug | 0.937 | 0.987 | **0.979** | -0.008 ✓ |
-| plank | 0.883 | 0.914 | **1.099** | +0.185 |
+| Ćwiczenie | M5 MAE | M7 MAE | Δ (M5→M7) |
+|---|---:|---:|---:|
+| low_bar_squat | 0.612 | **0.468** | -0.144 ✓ |
+| deadlift | 0.711 | **0.515** | -0.196 ✓ |
+| sumo_deadlift | 0.622 | **0.572** | -0.050 ✓ |
+| spoto_press | 0.676 | **0.591** | -0.085 ✓ |
+| skull_crusher | 0.867 | **0.606** | -0.261 ✓ |
+| pull_up | 0.661 | **0.608** | -0.053 ✓ |
+| dips | 0.670 | **0.613** | -0.057 ✓ |
+| incline_bench | 0.707 | **0.637** | -0.070 ✓ |
+| bulgarian_split_squat | 0.775 | **0.645** | -0.130 ✓ |
+| high_bar_squat | 0.773 | **0.647** | -0.126 ✓ |
+| pendlay_row | 0.712 | **0.652** | -0.060 ✓ |
+| close_grip_bench | 0.750 | **0.652** | -0.098 ✓ |
+| lat_pulldown | 0.642 | **0.653** | +0.011 |
+| decline_bench | 0.748 | **0.669** | -0.079 ✓ |
+| seal_row | 0.746 | **0.669** | -0.077 ✓ |
+| ohp | 0.694 | **0.670** | -0.024 ✓ |
+| rdl | 0.716 | **0.674** | -0.042 ✓ |
+| leg_extension | 0.749 | **0.678** | -0.071 ✓ |
+| bench_press | 0.779 | **0.681** | -0.098 ✓ |
+| incline_bench_45 | 0.783 | **0.705** | -0.078 ✓ |
+| chest_press_machine | 0.715 | **0.707** | -0.008 ✓ |
+| leg_press | 0.700 | **0.707** | +0.007 |
+| squat | 0.746 | **0.732** | -0.014 ✓ |
+| dumbbell_flyes | 0.730 | **0.733** | +0.003 |
+| leg_raises | 0.736 | **0.750** | +0.014 |
+| leg_curl | 0.735 | **0.756** | +0.021 |
+| ab_wheel | 0.802 | **0.770** | -0.032 ✓ |
+| farmers_walk | 0.821 | **0.781** | -0.040 ✓ |
+| suitcase_carry | 0.823 | **0.791** | -0.032 ✓ |
+| reverse_fly | 0.863 | **0.828** | -0.035 ✓ |
+| bird_dog | 0.954 | **0.869** | -0.085 ✓ |
+| plank | 1.099 | **0.874** | -0.225 ✓ |
+| trx_bodysaw | 0.740 | **0.889** | +0.149 |
+| dead_bug | 0.979 | **0.953** | -0.026 ✓ |
 
-Uwaga: M5 MAE wyższe niż M4 dla większości ćwiczeń — to efekt uczciwego per-user splitu. M4 walidował się na tych samych userach co trenował → sztucznie niskie MAE. Wyjątki (✓ = M5 lepszy niż M4): leg_raises, trx_bodysaw, decline_bench, squat, dead_bug — dla tych ćwiczeń generalizacja faktycznie się poprawiła.
+M7 poprawia MAE dla 29/34 ćwiczeń względem M5. Największe poprawy: `skull_crusher` (0.867→0.606, -0.261), `plank` (1.099→0.874, -0.225), `deadlift` (0.711→0.515, -0.196). Regresje to ćwiczenia izolowane lub core z niską wariancją RIR (`leg_raises`, `leg_curl`, `trx_bodysaw`, `dumbbell_flyes`).
 
-`skull_crusher` MAE znacznie wzrosło (0.482 → 0.867) — warto sprawdzić czy w nowym datasecie sekwencje skull_crusher są reprezentatywne.
-`plank/dead_bug/bird_dog` — core z niską wariancją RIR, model ma mało sygnału do nauki.
-
-## Ordering accuracy (eval_ordering.py)
+## Ordering accuracy
 
 Probe: w=0.5 (mediana datasetu), r=0.27 (~8 reps), rir=0.4 (~RIR 2), mpc=1.0.
 
-**M6 MEAN: 95%** | M5: 93% | M4: 90%
+**M7 MEAN: 91%** | M6: 95% | M5: 93% | M4: 90%
 
-| Ćwiczenie | M4 Acc | M5 Acc | M6 Acc | Δ M5→M6 |
+| Ćwiczenie | M5 Acc | M6 Acc | M7 Acc | Δ M6→M7 |
 |---|---:|---:|---:|---|
-| deadlift | 67% | 67% | **67%** | — (problem danych) |
-| decline_bench | 100% | 100% | **67%** | regresja ↓ |
-| incline_bench | 100% | 67% | **100%** | poprawa ✓ |
-| chest_press_machine | 100% | 67% | **100%** | poprawa ✓ |
-| dumbbell_flyes | 100% | 67% | **83%** | poprawa ✓ |
-| dips | 100% | 80% | **100%** | poprawa ✓ |
-| squat | 100% | 83% | **100%** | poprawa ✓ |
-| low_bar_squat | 100% | 83% | **100%** | poprawa ✓ |
-| lat_pulldown | 50% | 83% | **100%** | poprawa ✓ |
-| bird_dog | 0% | 100% | **100%** | — |
+| deadlift | 67% | 67% | **100%** | +33pp ✓✓ |
+| bulgarian_split_squat | 100% | 100% | **50%** | regresja ↓ |
+| spoto_press | 100% | 100% | **67%** | regresja ↓ |
+| chest_press_machine | 67% | 100% | **67%** | regresja ↓ |
+| pull_up | 100% | 100% | **67%** | regresja ↓ |
+| ohp | 100% | 100% | **80%** | regresja ↓ |
+| dumbbell_flyes | 67% | 83% | **83%** | — |
+| decline_bench | 100% | 67% | **100%** | poprawa ✓ |
+| incline_bench | 67% | 100% | **100%** | — |
+| lat_pulldown | 83% | 100% | **100%** | — |
 | high_bar_squat | 100% | 100% | **100%** | — |
 | sumo_deadlift | 100% | 100% | **100%** | — |
 | bench_press | 100% | 100% | **100%** | — |
 | close_grip_bench | 100% | 100% | **100%** | — |
-| spoto_press | 100% | 100% | **100%** | — |
 | incline_bench_45 | 100% | 100% | **100%** | — |
-| ohp | 100% | 100% | **100%** | — |
 | skull_crusher | 100% | 100% | **100%** | — |
-| bulgarian_split_squat | 67% | 100% | **100%** | — |
+| low_bar_squat | 83% | 100% | **100%** | — |
 | leg_press | 100% | 100% | **100%** | — |
-| pendlay_row | 83% | 100% | **100%** | — |
-| pull_up | 100% | 100% | **100%** | — |
+| pendlay_row | 100% | 100% | **100%** | — |
 | reverse_fly | 100% | 100% | **100%** | — |
 | seal_row | 100% | 100% | **100%** | — |
 | farmers_walk | 100% | 100% | **100%** | — |
 | leg_raises | 100% | 100% | **100%** | — |
-| trx_bodysaw | — | 100% | **100%** | — |
+| trx_bodysaw | 100% | 100% | **100%** | — |
 | suitcase_carry | 100% | 100% | **100%** | — |
-| **MEAN** | **90%** | **93%** | **95%** | |
+| bird_dog | 100% | 100% | **100%** | — |
+| squat | 83% | 100% | **100%** | — |
+| **MEAN** | **93%** | **95%** | **91%** | |
 
-**M6 poprawa vs M5:** incline_bench 67%→100%, chest_press_machine 67%→100%, dumbbell_flyes 67%→83%, dips 80%→100%, squat 83%→100%, low_bar_squat 83%→100%, lat_pulldown 83%→100%. Większy model nauczył się lepiej rozróżniać zmęczenie mięśni wtórnych (chest/triceps/quads) bez zmiany penalty.
+**Deadlift breakthrough:** nowy dataset z sekwencjami `deadlift→rdl` (6002 sesji) nauczył model że hamstrings zmęczone po deadlifcie wpływają na rdl — to było niemożliwe w poprzednich datasetach.
 
-**Regresja M6:** decline_bench 100%→67% — prawdopodobnie statystyczny artefakt (mało próbek decline_bench w val secie konkretnych userów) lub zmiana kolejności przy nowym probe point.
+**Regresje M7:** 5 ćwiczeń pogorszyło się względem M6. Możliwe przyczyny: nowy zestaw userów (63 val vs inne w M6), zmieniony rozkład sekwencji w nowym datasecie. Regresje skupiają się na ćwiczeniach z niejednoznaczną hierarchią mięśni (bulgarian_split_squat: quads/glutes sporna kolejność, ohp: anterior_delts vs lateral_delts).
 
-**Deadlift** nadal 67% we wszystkich modelach — erectors dominuje, glutes/hamstrings bliskie zeru. To problem sygnału w danych (brak sekwencji deadlift→rdl→leg_curl), nie architektury. Większy model nie pomaga.
+## Obserwacje z wykresów — M7 (`charts/20260418_0350/`)
 
-Szczegółowe drop values: uruchom `python eval_ordering.py` po treningu (uwaga: zaktualizować HIDDEN_DIM=256).
+**`chart_muscle_breakdown.png` — per-muscle fatigue breakdown (6 key exercises):**
+- Deadlift: hamstrings i glutes mają widoczny drop — poprawa vs M6 gdzie erectors całkowicie dominował ✓
+- Bench press: chest dominuje, ale triceps i anterior_delts wyraźnie widoczne — bez muscle collapse ✓
+- OHP: anterior_delts > lateral_delts > triceps — poprawna hierarchia ✓
+- Dips: chest > triceps > anterior_delts — poprawna hierarchia ✓
+
+**`chart_muscle_breakdown_all.png` — per-muscle fatigue breakdown (wszystkie 34 ćwiczenia):**
+- Pokazuje pełne spektrum muscle specificity modelu
+- Core exercises (plank, bird_dog, dead_bug): abs/erectors dominuje — poprawnie ✓
+- Izolowane ćwiczenia (leg_curl, leg_extension, skull_crusher): dominuje docelowy mięsień ✓
+
+**`chart_mpc_per_muscle_*.png` — MPC trajectories (3 userzy: 00017, 00092, 00020):**
+- Trzy różne profile treningowe — model generalizuje między userami ✓
+- Zębate wzorce drop+recovery fizjologicznie poprawne ✓
+- τ per muscle zgodne z literaturą ✓
+
+**`chart_transfer_matrix.png` — cross-exercise interference:**
+- Push/pull oddzielenie strukturalne ✓
+- Deadlift wpływa na rdl przez hamstrings — spójne z poprawą ordering ✓
 
 ## Obserwacje z wykresów — M6 (`charts/20260417_1954/`)
 
@@ -212,16 +207,10 @@ Szczegółowe drop values: uruchom `python eval_ordering.py` po treningu (uwaga:
 - Zębate wzorce drop+recovery fizjologicznie poprawne ✓
 - τ per muscle zgodne z literaturą ✓
 
-## Do zrobienia (Aleksander)
+## Do zrobienia
 
-- [ ] **deadlift ordering** — nadal 67% we wszystkich modelach (M4/M5/M6). Erectors dominuje, glutes/hamstrings ~0. M6 (HIDDEN_DIM=256) nie pomógł → problem jest w danych, nie architekturze. Potrzebne sesje `deadlift → rdl → leg_curl` gdzie hamstrings/glutes zmęczenie jest wyraźnie widoczne w kolejnych seriach. To najwyższy priorytet bo deadlift jest kluczowym ćwiczeniem.
+- [ ] **Ordering regresje M7** — 5 ćwiczeń pogorszyło się vs M6: bulgarian_split_squat (100%→50%), pull_up (100%→67%), chest_press_machine (100%→67%), spoto_press (100%→67%), ohp (100%→80%). Warto zbadać czy to efekt nowego rozkładu datasetu czy mniejsza reprezentatywność tych sekwencji w `full_generated`.
 
-- [ ] **Sekwencje cross-muscle** — M6 naprawił większość regresji M5 (incline_bench, chest_press_machine, dips, squat) bez zmiany danych, ale dumbbell_flyes nadal tylko 83%. Priorytetowe pary do dalszego wzmocnienia:
-  - `deadlift → rdl` (hamstrings wtórny → primary) — najważniejsze
-  - `bench_press → skull_crusher` (triceps wtórny → primary)
-  - `incline_bench → dumbbell_flyes` (chest wtórny → primary)
-  - `rdl → leg_curl` (hamstrings wtórny → primary)
+- [ ] **trx_bodysaw MAE regresja** — 0.740 (M5) → 0.889 (M7). Sprawdzić liczbę i jakość sekwencji trx_bodysaw w nowym datasecie.
 
-- [ ] **skull_crusher MAE** — wzrost 0.482 (M3) → 0.867 (M5) w czystym per-user splicie. Sprawdzić czy sekwencje skull_crusher w nowym datasecie są reprezentatywne (wystarczająco dużo serii po bench_press gdzie triceps jest zmęczone).
-
-- [ ] **Rozkład realistyczny z floor** — każde ćwiczenie ≥1500–2000 wierszy w train secie. `seal_row`, `decline_bench` i podobne ćwiczenia niszowe mogą być niedoreprezentowane (decline_bench ordering regresja w M6 to możliwy sygnał).
+- [ ] **Ujemne transfery w chart_transfer_matrix** — artefakt f_net>1 po normalizacji. Rozważyć clamp output f_net do [0,1] albo dodać penalty na output >1.

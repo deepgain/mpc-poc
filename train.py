@@ -30,7 +30,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 32
 HIDDEN_DIM = 256
 LR = 1e-3
-EPOCHS = 10
+EPOCHS = 150
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -887,7 +887,7 @@ test_sequences = build_user_sequences(test_df)
 _pinned_ids = {"user_00030", "user_00111"}
 _pinned = [s for s in test_sequences if s["user_id"] in _pinned_ids]
 _rest   = [s for s in test_sequences if s["user_id"] not in _pinned_ids]
-_best_rest = sorted(_rest, key=lambda s: len(s["exercise_idx"]), reverse=True)[:1]
+_best_rest = sorted(_rest, key=lambda s: len(s["exercise_idx"]), reverse=True)[:3]
 sample_users = (_pinned + _best_rest)[:3]
 
 model.eval()
@@ -1106,43 +1106,64 @@ plt.tight_layout()
 plt.savefig(f"{CHART_DIR}/chart_transfer_matrix.png", dpi=150)
 print("Saved chart_transfer_matrix.png")
 
-# ── Chart 7: Per-muscle fatigue breakdown ────────────────────────────────────
-_probe_ex = [e for e in ["bench_press", "squat", "deadlift", "ohp", "pendlay_row", "dips"]
-             if e in EXERCISE_TO_IDX]
+# ── Chart 7a: Per-muscle fatigue breakdown (6 key exercises) ─────────────────
+def _draw_muscle_breakdown(ax, ex, model, DEVICE, EXERCISE_TO_IDX, EXERCISE_MUSCLES, MUSCLE_TO_IDX, muscle_colors):
+    ei = EXERCISE_TO_IDX[ex]
+    ms = EXERCISE_MUSCLES[ex]
+    ee = model.exercise_embed(torch.tensor([ei], device=DEVICE))
+    involved = sorted(ms.keys(), key=lambda m: ms[m], reverse=True)
+    drops, cols = [], []
+    for m in involved:
+        me = model.muscle_embed(torch.tensor([MUSCLE_TO_IDX[m]], device=DEVICE))
+        d = model.f_net(
+            torch.tensor([0.4], dtype=torch.float32, device=DEVICE),
+            torch.tensor([0.27], dtype=torch.float32, device=DEVICE),
+            torch.tensor([0.4], dtype=torch.float32, device=DEVICE),
+            torch.tensor([1.0], dtype=torch.float32, device=DEVICE),
+            ee, me,
+        ).item()
+        drops.append(d * ms[m])
+        cols.append(muscle_colors[MUSCLE_TO_IDX[m]])
+    labs = [m.replace("_", " ") for m in involved]
+    ax.barh(range(len(labs)), drops, color=cols, alpha=0.85)
+    ax.set_yticks(range(len(labs)))
+    ax.set_yticklabels(labs, fontsize=9)
+    ax.set_xlabel("MPC Drop")
+    ax.set_title(f"{ex.replace('_', ' ').title()}")
+    ax.invert_yaxis()
+    ax.grid(True, alpha=0.3, axis="x")
+    for i, (d, m) in enumerate(zip(drops, involved)):
+        ax.text(d + 0.001, i, f"inv={ms[m]:.2f}", va="center", fontsize=7, color="gray")
+
+_key_ex = [e for e in ["bench_press", "squat", "deadlift", "ohp", "pendlay_row", "dips"]
+           if e in EXERCISE_TO_IDX]
 fig, axes = plt.subplots(2, 3, figsize=(18, 10))
 with torch.no_grad():
-    for idx, ex in enumerate(_probe_ex):
-        ax = axes[idx // 3, idx % 3]
-        ei = EXERCISE_TO_IDX[ex]
-        ms = EXERCISE_MUSCLES[ex]
-        ee = model.exercise_embed(torch.tensor([ei], device=DEVICE))
-        involved = sorted(ms.keys(), key=lambda m: ms[m], reverse=True)
-        drops, cols = [], []
-        for m in involved:
-            me = model.muscle_embed(torch.tensor([MUSCLE_TO_IDX[m]], device=DEVICE))
-            d = model.f_net(
-                torch.tensor([0.4], dtype=torch.float32, device=DEVICE),
-                torch.tensor([0.27], dtype=torch.float32, device=DEVICE),
-                torch.tensor([0.4], dtype=torch.float32, device=DEVICE),
-                torch.tensor([1.0], dtype=torch.float32, device=DEVICE),
-                ee, me,
-            ).item()
-            drops.append(d * ms[m])
-            cols.append(muscle_colors[MUSCLE_TO_IDX[m]])
-        labs = [m.replace("_", " ") for m in involved]
-        ax.barh(range(len(labs)), drops, color=cols, alpha=0.85)
-        ax.set_yticks(range(len(labs)))
-        ax.set_yticklabels(labs, fontsize=9)
-        ax.set_xlabel("MPC Drop")
-        ax.set_title(f"{ex.replace('_', ' ').title()}")
-        ax.invert_yaxis()
-        ax.grid(True, alpha=0.3, axis="x")
-        for i, (d, m) in enumerate(zip(drops, involved)):
-            ax.text(d + 0.001, i, f"inv={ms[m]:.2f}", va="center", fontsize=7, color="gray")
+    for idx, ex in enumerate(_key_ex):
+        _draw_muscle_breakdown(axes[idx // 3, idx % 3], ex, model, DEVICE,
+                               EXERCISE_TO_IDX, EXERCISE_MUSCLES, MUSCLE_TO_IDX, muscle_colors)
 plt.suptitle("Learned Fatigue (f) — Per-Muscle Breakdown", fontsize=14)
 plt.tight_layout()
 plt.savefig(f"{CHART_DIR}/chart_muscle_breakdown.png", dpi=150)
 print("Saved chart_muscle_breakdown.png")
+
+# ── Chart 7b: Per-muscle fatigue breakdown (all exercises) ───────────────────
+_all_ex = sorted(ALL_EXERCISES)
+_ncols_bd = 6
+_nrows_bd = math.ceil(len(_all_ex) / _ncols_bd)
+fig, axes = plt.subplots(_nrows_bd, _ncols_bd, figsize=(24, 5 * _nrows_bd))
+_axes_bd = np.array(axes).reshape(-1)
+with torch.no_grad():
+    for idx, ex in enumerate(_all_ex):
+        _draw_muscle_breakdown(_axes_bd[idx], ex, model, DEVICE,
+                               EXERCISE_TO_IDX, EXERCISE_MUSCLES, MUSCLE_TO_IDX, muscle_colors)
+        _axes_bd[idx].set_title(ex.replace("_", " ").title(), fontsize=9)
+for idx in range(len(_all_ex), len(_axes_bd)):
+    _axes_bd[idx].set_visible(False)
+plt.suptitle("Learned Fatigue (f) — Per-Muscle Breakdown (all exercises)", fontsize=14)
+plt.tight_layout()
+plt.savefig(f"{CHART_DIR}/chart_muscle_breakdown_all.png", dpi=150, bbox_inches="tight")
+print("Saved chart_muscle_breakdown_all.png")
 
 # ── Chart 8: RIR sensitivity per exercise ────────────────────────────────────
 _sens_ex = [e for e in ["bench_press", "squat", "deadlift", "ohp", "pendlay_row", "lat_pulldown"]
