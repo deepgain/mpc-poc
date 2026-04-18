@@ -2,16 +2,16 @@
 
 ## Metryki
 
-| | M4 (34 ćw., 15 mięśni) | M5 (34 ćw., 15 mięśni) | M6 (34 ćw., 15 mięśni) | **M7 (34 ćw., 15 mięśni)** |
-|---|---|---|---|---|
-| Val RMSE | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | **0.862 RIR** |
-| MAE | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | **0.677 RIR** |
-| R | 0.878¹ | 0.842 | 0.854 | **0.877** |
-| Ordering acc | 90% | 93% | 95% | **91%** |
-| HIDDEN_DIM | 128 | 128 | 256 | 256 |
-| Parametry | ~66k | ~66k | ~230k | ~230k |
-| Split | per-ex¹ | per-user | per-user | per-user |
-| Dataset | michal_full | michal_full | michal_full | **full_generated** |
+| | Baseline (27 ćw.) | M2 (44 ćw.) | M3 (47 ćw., 17 m.) | M4 (34 ćw., 15 m.) | M5 (34 ćw., 15 m.) | M6 (34 ćw., 15 m.) | **M7 (34 ćw., 15 m.)** |
+|---|---|---|---|---|---|---|---|
+| Val RMSE | 1.080 RIR | 1.005 RIR | 0.845 RIR | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | **0.862 RIR** |
+| MAE | 0.860 RIR | 0.789 RIR | 0.656 RIR | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | **0.677 RIR** |
+| R | 0.789 | 0.833 | 0.884 | 0.878¹ | 0.842 | 0.854 | **0.877** |
+| Ordering acc | — | — | — | 90% | 93% | 95% | **91%** |
+| HIDDEN_DIM | 128 | 128 | 128 | 128 | 128 | 256 | 256 |
+| Parametry | ~66k | ~66k | ~66k | ~66k | ~66k | ~230k | ~230k |
+| Split | per-user | per-user | per-user | per-ex¹ | per-user | per-user | per-user |
+| Dataset | generated | generated | generated | michal_full | michal_full | michal_full | **full_generated** |
 
 ¹ M4 z data leakage (per-exercise split) — metryki zbyt optymistyczne.
 
