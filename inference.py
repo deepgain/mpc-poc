@@ -38,9 +38,8 @@ elif torch.backends.mps.is_available():
 else:
     _DEFAULT_DEVICE = torch.device("cpu")
 
-# ─── Constants (must stay in sync with train.py) ────────────────────────────
-EMBED_DIM    = 32
-HIDDEN_DIM   = 128
+# ─── Constants ──────────────────────────────────────────────────────────────
+# EMBED_DIM / HIDDEN_DIM are auto-detected from checkpoint in load_model().
 WEIGHT_SCALE = 200.0
 REPS_SCALE   = 30.0
 RIR_SCALE    = 5.0
@@ -222,9 +221,12 @@ def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
     """
     if device is None:
         device = _DEFAULT_DEVICE
-    model = DeepGainModel(NUM_EXERCISES, NUM_MUSCLES, EMBED_DIM, HIDDEN_DIM)
     ckpt  = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model.load_state_dict(ckpt.get("model_state_dict", ckpt))
+    state = ckpt.get("model_state_dict", ckpt)
+    embed_dim  = state["exercise_embed.weight"].shape[1]
+    hidden_dim = state["f_net.net.0.weight"].shape[0]
+    model = DeepGainModel(NUM_EXERCISES, NUM_MUSCLES, embed_dim, hidden_dim)
+    model.load_state_dict(state)
     model = model.to(device)
     model.eval()
     # Attach per-exercise weight normalization ranges (saved since M5).
