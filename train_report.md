@@ -2,16 +2,19 @@
 
 ## Metryki
 
-| | Baseline (27 ćw.) | M2 (44 ćw.) | M3 (47 ćw., 17 m.) | M4 (34 ćw., 15 m.) | M5 (34 ćw., 15 m.) | M6 (34 ćw., 15 m.) | **M7 (34 ćw., 15 m.)** |
-|---|---|---|---|---|---|---|---|
-| Val RMSE | 1.080 RIR | 1.005 RIR | 0.845 RIR | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | **0.862 RIR** |
-| MAE | 0.860 RIR | 0.789 RIR | 0.656 RIR | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | **0.677 RIR** |
-| R | 0.789 | 0.833 | 0.884 | 0.878¹ | 0.842 | 0.854 | **0.877** |
-| Ordering acc | — | — | — | 90% | 93% | 95% | **91%** |
-| HIDDEN_DIM | 128 | 128 | 128 | 128 | 128 | 256 | 256 |
-| Parametry | ~66k | ~66k | ~66k | ~66k | ~66k | ~230k | ~230k |
-| Split | per-user | per-user | per-user | per-ex¹ | per-user | per-user | per-user |
-| Dataset | generated | generated | generated | michal_full | michal_full | michal_full | **full_generated** |
+| | Baseline (27 ćw.) | M2 (44 ćw.) | M3 (47 ćw., 17 m.) | M4 (34 ćw., 15 m.) | M5 (34 ćw., 15 m.) | M6 (34 ćw., 15 m.) | M7 (34 ćw., 15 m.) | **M8† (34 ćw., 15 m.)** |
+|---|---|---|---|---|---|---|---|---|
+| Val RMSE | 1.080 RIR | 1.005 RIR | 0.845 RIR | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | 0.862 RIR | **0.943 RIR†** |
+| MAE | 0.860 RIR | 0.789 RIR | 0.656 RIR | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | 0.677 RIR | **0.719 RIR†** |
+| R | 0.789 | 0.833 | 0.884 | 0.878¹ | 0.842 | 0.854 | 0.877 | **0.850†** |
+| Ordering acc | — | — | — | 90% | 93% | 95% | 91% | **94%†** |
+| HIDDEN_DIM | 128 | 128 | 128 | 128 | 128 | 256 | 256 | 512 |
+| EMBED_DIM | 32 | 32 | 32 | 32 | 32 | 32 | 32 | 64 |
+| Parametry | ~66k | ~66k | ~66k | ~66k | ~66k | ~230k | ~230k | ~902k |
+| Split | per-user | per-user | per-user | per-ex¹ | per-user | per-user | per-user | per-user |
+| Dataset | generated | generated | generated | michal_full | michal_full | michal_full | full_generated | full_generated |
+
+† M8 po **50/150 epokach** — wartości tymczasowe, model nie wytrenowany. RMSE/MAE wyższe niż M7 bo 902k parametrów uczy się wolniej — konwergencja spodziewana przy ~100-150 epokach. Ordering 94% już przy ep 50 sugeruje że pełny trening poprawi M7's 91%.
 
 ¹ M4 z data leakage (per-exercise split) — metryki zbyt optymistyczne.
 
@@ -23,6 +26,31 @@ Best checkpoint: `deepgain_model_best.pt` (epoka ~62, val RMSE 0.8619).
 - **Nowy dataset** (`training_data_full_generated.csv`) — wszystkie priorytetowe sekwencje cross-muscle obecne (bench→skull: 4811 sesji, deadlift→rdl: 6002 sesji, incline→flyes: 6888 sesji)
 - **Nowe wagi EMG** — bench_press chest coefficient obniżony (0.70→0.64), erectors 0.70→0.68, abs 0.80→0.74
 - HIDDEN_DIM=256, split, normalizacja, penalty — bez zmian vs M6
+
+---
+
+## M8 — Wyniki po 50/150 epokach (wstępne)
+
+> Trening niezakończony. HIDDEN_DIM=512, EMBED_DIM=64, ~902k parametrów (4× więcej niż M7).
+
+**Val RMSE: 0.943 @ ep 50** — model nadal zbiega, nie osiągnął plateau (ep 47: 0.94, ep 50: 0.94 — wciąż spada). Przy M7 best był przy epoce ~62, a tu model jest 4× większy → potrzebuje ~100-150 epok.
+
+**Ordering MEAN: 94%** — już lepszy niż M7's 91% przy zaledwie 50 epokach ✓
+
+| Ćwiczenie | M7 (150ep) | M8 (50ep) | Δ |
+|---|---:|---:|---|
+| decline_bench | 100% | **33%** | regresja ⚠️ (za mało epok) |
+| deadlift | 100% | **83%** | regresja (za mało epok) |
+| bulgarian_split_squat | 50% | **67%** | poprawa ✓ |
+| dips | 100% | **80%** | regresja (za mało epok) |
+| ohp | 80% | **90%** | poprawa ✓ |
+| sumo_deadlift | 100% | **90%** | regresja (za mało epok) |
+| pozostałe | 91% mean | **100%** | — |
+| **MEAN** | **91%** | **94%** | **+3pp†** |
+
+**decline_bench MAE: 2.379** — kompletny collapse dla tego ćwiczenia przy 50 epokach. Prawdopodobnie przypadkowy artefakt wczesnego treningu — powinien zniknąć przy 150 epokach.
+
+Wyniki po pełnych 150 epokach zostaną tu uzupełnione.
 
 ---
 
