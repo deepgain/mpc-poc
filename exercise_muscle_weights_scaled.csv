@@ -1,6 +1,6 @@
 exercise_id,csv_title,source,per_exercise_max_after_clip,global_clip_p99,chest,anterior_delts,lateral_delts,rear_delts,upper_traps,rhomboids,triceps,biceps,brachialis,lats,quads,hamstrings,glutes,adductors,erectors,calves,abs
 ab_wheel,Ab Wheel Rollout (Kółko),Marchetti 2017,44.4,135.6188,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0
-bench_press,Wyciskanie Leżąc (Bench Press),Coratella 2019 / Soncin 2014,105.088,135.6188,1.0,0.203639,0.047579,0.033305,0.0,0.0,0.654499,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+bench_press,Wyciskanie Leżąc (Bench Press),Coratella 2019 / Soncin 2014,105.088,135.6188,1.0,0.203639,0.047579,0.0,0.0,0.0,0.654499,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 bird_dog,Bird Dog (Pies-ptak),Losavio 2023,87.5,135.6188,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,0.893714,0.0,0.0
 bulgarian_split_squat,Bulgarian Split Squat,Andersen 2014,81.7,135.6188,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.194614,0.537209,0.0,0.425312,0.0,0.0
 chest_press_machine,Chest Press (Maszyna siedząc),Coratella 2023,95.83,135.6188,1.0,0.250443,0.0,0.0,0.0,0.0,0.125222,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
@@ -9,7 +9,7 @@ dead_bug,Dead Bug (60 bpm - wolne tempo),Byeong-Gwon Yun 2017,76.9156,135.6188,0
 deadlift,Martwy Ciąg (Deadlift),Martin-Fuentes 2020,75.0,135.6188,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.6,1.0,0.821333,0.0,0.834134,0.0,0.0
 decline_bench,Decline Bench Press,Lauver 2015,114.66,135.6188,1.0,0.50846,0.0,0.0,0.0,0.0,0.891331,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 dips,Dips (Pompki na poręczach - szerokie),Bagchi 2015 / McKenzie 2022,90.72,135.6188,1.0,0.71649,0.275573,0.0,0.0,0.0,0.876653,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.407848
-dumbbell_flyes,Rozpiętki (Dumbbell Flyes),Sousa 2022 / Campos 2020,59.22,135.6188,1.0,0.31746,0.057413,0.042215,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+dumbbell_flyes,Rozpiętki (Dumbbell Flyes),Sousa 2022 / Campos 2020,59.22,135.6188,1.0,0.31746,0.057413,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 farmers_walk,Farmer’s Walk,Ellestad 2024,22.236,135.6188,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,0.828656
 high_bar_squat,High Bar Squat,Yavuz 2015,48.8,135.6188,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,0.532172,0.0,0.0,0.0,0.0
 incline_bench,Incline Bench Press,Rodríguez-Ridao 2020 / Lauver 2015,114.3,135.6188,0.951706,0.795276,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0

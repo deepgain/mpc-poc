@@ -124,7 +124,7 @@ exercises:
     category: compound
     primary_muscles: [chest]
     secondary_muscles: [triceps, anterior_delts]
-    tertiary_muscles: [lateral_delts, rear_delts]
+    tertiary_muscles: [lateral_delts]
 
   close_grip_bench:
     csv_title: "Close Grip Bench Press"
@@ -205,7 +205,7 @@ exercises:
     category: isolation
     primary_muscles: [chest]
     secondary_muscles: [anterior_delts]
-    tertiary_muscles: [lateral_delts, rear_delts]
+    tertiary_muscles: [lateral_delts]
 
   skull_crusher:
     csv_title: "Wyciskanie Francuskie"

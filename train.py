@@ -711,7 +711,7 @@ for epoch in range(EPOCHS):
                             batch["reps"], batch["rir"], batch["delta_t"], batch["mask"])
         loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
         loss = loss + 0.05 * model.fatigue_ordering_penalty()
-        loss = loss + 0.10 * model.minimum_drop_penalty()
+        loss = loss + 0.10 * model.minimum_drop_penalty(min_fraction=0.25)
         loss = loss + 0.05 * model.monotone_fatigue_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
