@@ -30,7 +30,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 64
 HIDDEN_DIM = 512
 LR = 1e-3
-EPOCHS = 50
+EPOCHS = 5
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -529,6 +529,51 @@ class DeepGainModel(nn.Module):
 
         return penalty / max(n_muscles, 1)
 
+    def monotone_fatigue_penalty(self, n_pairs: int = 50):
+        """Penalize g_net when it predicts higher RIR for exercise B after fatiguing with A.
+
+        Samples n_pairs random (ea, eb) pairs. For each pair: simulate 4 sets of ea,
+        then check g_net predicts lower or equal RIR for eb vs fresh MPC.
+        """
+        device = self.involvement.device
+        penalty = torch.tensor(0.0, device=device)
+
+        w   = torch.tensor([0.4],  dtype=torch.float32, device=device)
+        r   = torch.tensor([0.27], dtype=torch.float32, device=device)
+        rir = torch.tensor([0.4],  dtype=torch.float32, device=device)
+
+        me_all = self.muscle_embed(torch.arange(self.num_muscles, device=device)).unsqueeze(0)
+        Ed = me_all.shape[-1]
+        N  = len(ALL_EXERCISES)
+
+        pairs = [(int(torch.randint(N, (1,))), int(torch.randint(N, (1,))))
+                 for _ in range(n_pairs)]
+
+        for ea_i, eb_i in pairs:
+            # fatigue MPC by simulating 4 sets of exercise A
+            eea = self.exercise_embed(torch.tensor([ea_i], device=device))
+            inv = self.involvement[torch.tensor([ea_i], device=device)]
+            mpc = torch.ones(1, self.num_muscles, device=device)
+            for _ in range(4):
+                drop = self.f_net(
+                    w.expand(self.num_muscles),
+                    r.expand(self.num_muscles),
+                    rir.expand(self.num_muscles),
+                    mpc.reshape(-1),
+                    eea.expand(self.num_muscles, -1),
+                    me_all.reshape(self.num_muscles, Ed),
+                ).reshape(1, self.num_muscles)
+                mpc = (mpc * (1.0 - inv * drop)).clamp(min=0.1)
+
+            # predict RIR for exercise B — fresh vs fatigued
+            eeb       = self.exercise_embed(torch.tensor([eb_i], device=device))
+            mpc_fresh = torch.ones(1, self.num_muscles, device=device)
+            rir_fresh = self.g_net(w, r, eeb, mpc_fresh)
+            rir_fat   = self.g_net(w, r, eeb, mpc)
+            penalty   = penalty + torch.relu(rir_fat - rir_fresh)
+
+        return penalty / n_pairs
+
     def forward(self, exercise_idx, weight, reps, rir_target, delta_t, mask):
         B, T = exercise_idx.shape
         M = self.num_muscles
@@ -667,6 +712,7 @@ for epoch in range(EPOCHS):
         loss = masked_mse(rir_pred, batch["rir"], batch["mask"])
         loss = loss + 0.05 * model.fatigue_ordering_penalty()
         loss = loss + 0.10 * model.minimum_drop_penalty()
+        loss = loss + 0.05 * model.monotone_fatigue_penalty()
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -709,12 +755,13 @@ for epoch in range(EPOCHS):
     tau_all_str = "  τ: " + " | ".join(tau_strs)
 
     with torch.no_grad():
-        ord_penalty = model.fatigue_ordering_penalty().item()
-        min_penalty = model.minimum_drop_penalty().item()
+        ord_penalty  = model.fatigue_ordering_penalty().item()
+        min_penalty  = model.minimum_drop_penalty().item()
+        mono_penalty = model.monotone_fatigue_penalty().item()
 
     print(f"Epoch {epoch+1:3d}/{EPOCHS} | "
           f"Train RMSE: {train_rmse:.2f} RIR | Val RMSE: {val_rmse:.2f} RIR | "
-          f"ord_pen: {ord_penalty:.4f} | min_pen: {min_penalty:.4f} | {elapsed:.0f}s", flush=True)
+          f"ord_pen: {ord_penalty:.4f} | min_pen: {min_penalty:.4f} | mono_pen: {mono_penalty:.4f} | {elapsed:.0f}s", flush=True)
     print(recovery_str, flush=True)
     print(tau_all_str, flush=True)
 
@@ -822,6 +869,23 @@ print(f"  {'MEAN':25s}: {overall_acc*100:.0f}%")
 CHART_DIR = os.path.join("charts", datetime.now().strftime("%Y%m%d_%H%M"))
 os.makedirs(CHART_DIR, exist_ok=True)
 print(f"Charts → {CHART_DIR}/")
+
+with open(os.path.join(CHART_DIR, "README.md"), "w") as _f:
+    _f.write(f"# Model parameters\n\n")
+    _f.write(f"| Parameter | Value |\n|---|---|\n")
+    _f.write(f"| HIDDEN_DIM | {HIDDEN_DIM} |\n")
+    _f.write(f"| EMBED_DIM | {EMBED_DIM} |\n")
+    _f.write(f"| EPOCHS | {EPOCHS} |\n")
+    _f.write(f"| LR | {LR} |\n")
+    _f.write(f"| BATCH_SIZE | {BATCH_SIZE} |\n")
+    _f.write(f"| CHUNK_LEN | {CHUNK_LEN} |\n")
+    _f.write(f"| Dataset | {_FULL_CSV if os.path.exists(_FULL_CSV) else 'pre-split'} |\n")
+    _f.write(f"| Parameters | {sum(p.numel() for p in model.parameters()):,} |\n")
+    _f.write(f"| Val RMSE (best) | {np.sqrt(best_val_loss) * RIR_SCALE:.4f} |\n")
+    _f.write(f"| Test RMSE | {rmse:.4f} |\n")
+    _f.write(f"| Test MAE | {mae:.4f} |\n")
+    _f.write(f"| Ordering MEAN | {overall_acc*100:.0f}% |\n")
+    _f.write(f"| Penalties | ord=0.05 min_drop=0.10 mono=0.05 |\n")
 
 muscle_colors = plt.cm.tab20(np.linspace(0, 1, NUM_MUSCLES))
 
