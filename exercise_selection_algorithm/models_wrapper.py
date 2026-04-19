@@ -20,6 +20,7 @@ Kontrakt (stable, nie zmieniać):
 """
 
 import os
+import sys
 import math
 import logging
 from datetime import datetime
@@ -34,11 +35,42 @@ logger = logging.getLogger(__name__)
 _REAL_MODEL_AVAILABLE = False
 _REAL_INFERENCE = None
 
+
+def _find_and_add_inference_path() -> Optional[str]:
+    """
+    Znajdź katalog z inference.py i dodaj go do sys.path.
+
+    Przeszukuje:
+      1. Bieżący katalog skryptu (obok models_wrapper.py)
+      2. Katalog-rodzic (jeden poziom wyżej) — typowy setup Michała w mpc-poc/
+      3. Katalog-rodzic-rodzic (2 poziomy wyżej) — fallback
+
+    Zwraca path gdzie znaleziono inference.py, lub None.
+    """
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        this_dir,
+        os.path.dirname(this_dir),
+        os.path.dirname(os.path.dirname(this_dir)),
+        os.getcwd(),  # cwd też — jeśli uruchamiasz z innego miejsca
+    ]
+
+    for candidate in candidates:
+        inference_path = os.path.join(candidate, "inference.py")
+        if os.path.isfile(inference_path):
+            if candidate not in sys.path:
+                sys.path.insert(0, candidate)
+            return candidate
+    return None
+
+
+_INFERENCE_DIR = _find_and_add_inference_path()
+
 try:
     import inference as _real_inference
     _REAL_INFERENCE = _real_inference
     _REAL_MODEL_AVAILABLE = True
-    logger.info("✓ DeepGain inference module available")
+    logger.info(f"✓ DeepGain inference module loaded from: {_INFERENCE_DIR}")
 except Exception as e:
     logger.warning(f"⚠ DeepGain inference not available: {e}")
     logger.warning("  Falling back to mock model")
@@ -94,7 +126,8 @@ def initialize_model(
     Załaduj model (real lub mock).
 
     Args:
-        checkpoint_path: Ścieżka do .pt file z wag modelu Michała
+        checkpoint_path: Ścieżka do .pt file z wag modelu Michała.
+            Jeśli relatywna, szukamy w katalogu gdzie znaleziony był inference.py.
         force_mock: Jeśli True, wymusza użycie mock modelu
         tau_scale: Skala tau dla MockModel (user calibration).
                    Real DeepGain używa własnych tau z checkpointa.
@@ -110,17 +143,39 @@ def initialize_model(
         _USING_REAL_MODEL = False
         return _MODEL_INSTANCE
 
-    # Sprawdź dostępność pliku checkpoint
-    if not os.path.exists(checkpoint_path):
-        logger.warning(f"⚠ Checkpoint not found: {checkpoint_path}")
+    # Rozwiąż ścieżkę do checkpointa:
+    #   - absolute → bez zmian
+    #   - relative → spróbuj w _INFERENCE_DIR (tam gdzie inference.py)
+    resolved_checkpoint = checkpoint_path
+    if not os.path.isabs(checkpoint_path) and _INFERENCE_DIR:
+        candidate = os.path.join(_INFERENCE_DIR, checkpoint_path)
+        if os.path.isfile(candidate):
+            resolved_checkpoint = candidate
+
+    if not os.path.isfile(resolved_checkpoint):
+        logger.warning(f"⚠ Checkpoint not found: {resolved_checkpoint}")
         logger.warning(f"  Falling back to MockModel (tau_scale={tau_scale})")
         _MODEL_INSTANCE = MockModelHandle(tau_scale=tau_scale)
         _USING_REAL_MODEL = False
         return _MODEL_INSTANCE
 
+    # Michał's inference.py szuka exercise_muscle_order.yaml i
+    # exercise_muscle_weights_scaled.csv w cwd. Jeśli te pliki są w _INFERENCE_DIR
+    # a nie w cwd, tymczasowo zmień cwd na czas ładowania.
+    original_cwd = os.getcwd()
+    need_cd = False
+    if _INFERENCE_DIR and _INFERENCE_DIR != original_cwd:
+        yaml_here = os.path.isfile(os.path.join(original_cwd, "exercise_muscle_order.yaml"))
+        yaml_there = os.path.isfile(os.path.join(_INFERENCE_DIR, "exercise_muscle_order.yaml"))
+        if not yaml_here and yaml_there:
+            need_cd = True
+
     try:
-        real_model = _REAL_INFERENCE.load_model(checkpoint_path)
-        logger.info(f"✓ Loaded DeepGain from {checkpoint_path}")
+        if need_cd:
+            os.chdir(_INFERENCE_DIR)
+            logger.info(f"  (tymczasowa zmiana cwd na {_INFERENCE_DIR} dla inference.py)")
+        real_model = _REAL_INFERENCE.load_model(resolved_checkpoint)
+        logger.info(f"✓ Loaded DeepGain from {resolved_checkpoint}")
         _MODEL_INSTANCE = RealModelHandle(real_model)
         _USING_REAL_MODEL = True
     except Exception as e:
@@ -128,6 +183,9 @@ def initialize_model(
         logger.warning(f"  Falling back to MockModel (tau_scale={tau_scale})")
         _MODEL_INSTANCE = MockModelHandle(tau_scale=tau_scale)
         _USING_REAL_MODEL = False
+    finally:
+        if need_cd:
+            os.chdir(original_cwd)
 
     return _MODEL_INSTANCE
 

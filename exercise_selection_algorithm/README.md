@@ -1,6 +1,6 @@
 # WorkoutPlanner v3 — Silnik Rekomendacyjny Treningów
 
-**Z integracją DeepGain (Michał)** — pełny silnik planujący trening siłowy z optymalizacją zmęczenia mięśni.
+**Z integracją DeepGain ** — pełny silnik planujący trening siłowy z optymalizacją zmęczenia mięśni.
 
 ## ⚡ Co nowego w v3
 
@@ -347,9 +347,3 @@ class UserProfile:
 ## 📝 Stable Contract
 
 Interfejs `plan()` / `replan()` jest stabilny. Zmiany modelu (DeepGain) są niewidoczne dla klientów — wrapper zapewnia kompatybilność.
-
-## 👤 Współpraca
-
-- **Michał** (`models/`): `inference.py` + `.pt` checkpoint
-- **Aleksander** (`dataset/`): tau per mięsień, target zones z literatury, volume limits
-- **Miłosz** (planner): `WorkoutPlanner` (ten kod)
