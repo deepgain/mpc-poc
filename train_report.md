@@ -2,19 +2,19 @@
 
 ## Metryki
 
-| | Baseline (27 ćw.) | M2 (44 ćw.) | M3 (47 ćw., 17 m.) | M4 (34 ćw., 15 m.) | M5 (34 ćw., 15 m.) | M6 (34 ćw., 15 m.) | M7 (34 ćw., 15 m.) | **M8† (34 ćw., 15 m.)** |
-|---|---|---|---|---|---|---|---|---|
-| Val RMSE | 1.080 RIR | 1.005 RIR | 0.845 RIR | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | 0.862 RIR | **0.904 RIR†** |
-| MAE | 0.860 RIR | 0.789 RIR | 0.656 RIR | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | 0.677 RIR | **0.710 RIR†** |
-| R | 0.789 | 0.833 | 0.884 | 0.878¹ | 0.842 | 0.854 | 0.877 | **0.863†** |
-| Ordering acc | — | — | — | 90% | 93% | 95% | 91% | **99%†** |
-| HIDDEN_DIM | 128 | 128 | 128 | 128 | 128 | 256 | 256 | 512 |
-| EMBED_DIM | 32 | 32 | 32 | 32 | 32 | 32 | 32 | 64 |
-| Parametry | ~66k | ~66k | ~66k | ~66k | ~66k | ~230k | ~230k | ~902k |
-| Split | per-user | per-user | per-user | per-ex¹ | per-user | per-user | per-user | per-user |
-| Dataset | generated | generated | generated | michal_full | michal_full | michal_full | full_generated | full_generated |
+| | Baseline (27 ćw.) | M2 (44 ćw.) | M3 (47 ćw., 17 m.) | M4 (34 ćw., 15 m.) | M5 (34 ćw., 15 m.) | M6 (34 ćw., 15 m.) | M7 (34 ćw., 15 m.) | M8 30ep | **M8 100ep** |
+|---|---|---|---|---|---|---|---|---|---|
+| Val RMSE | 1.080 RIR | 1.005 RIR | 0.845 RIR | 0.869 RIR¹ | 0.963 RIR | 0.924 RIR | 0.862 RIR | 0.904 RIR | **0.848 RIR** |
+| MAE | 0.860 RIR | 0.789 RIR | 0.656 RIR | 0.673 RIR¹ | 0.753 RIR | 0.749 RIR | 0.677 RIR | 0.710 RIR | **0.656 RIR** |
+| R | 0.789 | 0.833 | 0.884 | 0.878¹ | 0.842 | 0.854 | 0.877 | 0.863 | **0.882** |
+| Ordering acc | — | — | — | 90% | 93% | 95% | 91% | 99% | **93%** |
+| HIDDEN_DIM | 128 | 128 | 128 | 128 | 128 | 256 | 256 | 512 | 512 |
+| EMBED_DIM | 32 | 32 | 32 | 32 | 32 | 32 | 32 | 64 | 64 |
+| Parametry | ~66k | ~66k | ~66k | ~66k | ~66k | ~230k | ~230k | ~902k | ~902k |
+| Split | per-user | per-user | per-user | per-ex¹ | per-user | per-user | per-user | per-user | per-user |
+| Dataset | generated | generated | generated | michal_full | michal_full | michal_full | full_generated | full_generated | full_generated |
 
-† M8 po **30/150 epokach** — wartości tymczasowe, model nadal zbiega. Ordering **99%** — najlepszy wynik w historii projektu (bird_dog 0%→100%). Konfiguracja: min_fraction=0.25 + rear_delts usunięte z bench_press/dumbbell_flyes. Przy 150ep spodziewane pobicie M7's 0.862 RMSE.
+**M8 100ep finalny:** RMSE 0.848 — pobija M7 o 0.014. Ordering 93% (spadek z 99% @ 30ep) — deadlift, chest_press_machine, leg_press, pull_up spadły do 67%. Tradeoff: więcej epok poprawia RMSE ale model częściowo "zapomina" ordering dla trudniejszych ćwiczeń.
 
 ¹ M4 z data leakage (per-exercise split) — metryki zbyt optymistyczne.
 
@@ -29,44 +29,51 @@ Best checkpoint: `deepgain_model_best.pt` (epoka ~62, val RMSE 0.8619).
 
 ---
 
-## M8 — Wyniki po 50/150 epokach (wstępne)
+## M8 FINAL — Wyniki końcowe (100 epok)
 
-> Trening niezakończony. HIDDEN_DIM=512, EMBED_DIM=64, ~902k parametrów (4× więcej niż M7).
+**Konfiguracja M8:** EMBED_DIM=64, HIDDEN_DIM=512, ~902k parametrów. `min_fraction=0.25` + `rear_delts` usunięte z bench_press i dumbbell_flyes (YAML + CSV). Checkpoint: `deepgain_model_best.pt`.
 
-**Konfiguracja finalna M8:** `min_fraction=0.25` (poprzednio 0.15) + `rear_delts` usunięte z bench_press i dumbbell_flyes (YAML + CSV).
+**Val RMSE: 0.848** — pobija M7 (0.862) o 0.014. MAE 0.656 = wyrównanie M3, R=0.882.
 
-**Val RMSE: 0.904 @ ep 29 (best)** — model nadal zbiega. Przy 150ep spodziewane wyraźne pobicie M7's 0.862.
+**Ordering MEAN: 93%** — regresja z 99% (30ep). Przy 100ep model zoptymalizował RMSE kosztem ordering dla compound ćwiczeń z wieloma mięśniami: deadlift 67%, chest_press_machine 67%, leg_press 67%, pull_up 67%.
 
-**Ordering MEAN: 99%** — najlepszy wynik w historii projektu. bird_dog naprawiony (0%→100%). Tylko ohp (80%) i dips (90%) poniżej 100%.
+**Per-exercise MAE @ 100ep (vs M7):**
 
-**Muscle breakdown poprawiony** — triceps widoczny bar dla bench_press (~0.12 vs ~0.02 wcześniej). Deadlift: hamstrings dominuje zamiast erectors — fizjologicznie poprawne.
-
-| Ćwiczenie | M7 (150ep) | M8 (30ep) | Δ |
+| Ćwiczenie | M7 MAE | M8 FINAL MAE | Δ |
 |---|---:|---:|---|
-| bird_dog | 100% | **100%** | naprawiony ✓ |
-| ohp | 80% | **80%** | bez zmian |
-| dips | 100% | **90%** | regresja (za mało epok) |
-| pozostałe | — | **100%** | — |
-| **MEAN** | **91%** | **99%** | **+8pp** |
+| skull_crusher | 0.606 | **0.495** | -0.111 ✓ |
+| deadlift | 0.515 | **0.497** | -0.018 ✓ |
+| lat_pulldown | 0.653 | **0.570** | -0.083 ✓ |
+| rdl | 0.674 | **0.639** | -0.035 ✓ |
+| ohp | 0.670 | **0.642** | -0.028 ✓ |
+| incline_bench | 0.637 | **0.602** | -0.035 ✓ |
+| dead_bug | 0.953 | **0.924** | -0.029 ✓ |
+| bench_press | 0.681 | **0.693** | +0.012 |
+| plank | 0.874 | **0.893** | +0.019 |
+| trx_bodysaw | 0.889 | **0.917** | +0.028 |
 
-**Per-exercise MAE @ ep 30:**
+---
 
-| Ćwiczenie | M7 MAE | M8 (30ep) MAE | Δ |
-|---|---:|---:|---|
-| skull_crusher | 0.606 | **0.547** | -0.059 ✓ |
-| deadlift | 0.515 | **0.554** | +0.039 |
-| lat_pulldown | 0.653 | **0.665** | +0.012 |
-| spoto_press | 0.591 | **0.643** | +0.052 |
-| incline_bench | 0.637 | **0.677** | +0.040 |
-| bench_press | 0.681 | **0.749** | +0.068 |
-| rdl | 0.674 | **0.705** | +0.031 |
-| decline_bench | 0.669 | **0.735** | +0.066 |
-| plank | 0.874 | **0.936** | +0.062 |
-| dead_bug | 0.953 | **0.948** | -0.005 ✓ |
+## Obserwacje z wykresów — M8 FINAL (`charts/20260419_0604/`)
 
-Regresje MAE to efekt za małej liczby epok — model nie skończył konwergencji. Po 150ep spodziewane pobicie M7 we wszystkich kategoriach.
+**`chart_transfer_matrix.png` — wyraźna poprawa struktury vs 30ep:**
+- Push cluster: dips→bench 4.5, bench→bench 3.7, ohp→ohp 4.0 — spójna blokowa struktura
+- Pull cluster: lat_pulldown→pendlay_row 4.1, pull_up→pull_up 4.1 — dobrze oddzielony od push
+- Posterior chain: deadlift→squat 4.3 — silny transfer hamstrings/quads ✓
+- rdl→squat 3.3, rdl→deadlift 2.4 — sensowny transfer przez hamstrings ✓
+- Macierz bardziej "blokowa" niż 30ep — model nauczył się struktury mięśniowej przy dłuższym treningu
 
-Wyniki po pełnych 150 epokach zostaną tu uzupełnione.
+**`chart_muscle_breakdown_all.png`:**
+- Bench press: chest > triceps (inv=0.83) > anterior_delts — hierarchia zachowana ✓
+- Deadlift: hamstrings dominuje (inv=1.0), erectors/glutes widoczne — fizjologicznie poprawne ✓
+- OHP: anterior_delts > lateral_delts > triceps ✓
+- Pendlay row: rear_delts dominant, rhomboids secondary ✓
+- Pull up: lats > biceps > rhomboids ✓
+
+**`chart_mpc_per_muscle_*.png` — 3 userzy:**
+- Wzorce drop+recovery fizjologicznie czyste we wszystkich 15 mięśniach ✓
+- Chest (τ=16h) odbudowuje się wolniej niż rear_delts (τ=8h) — zgodnie z literaturą ✓
+- τ fixed = stabilne krzywe, brak patologicznych wahań ✓
 
 ---
 
