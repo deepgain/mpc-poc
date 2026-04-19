@@ -110,13 +110,35 @@ class WorkoutPlanner:
     ):
         """
         Args:
-            config: PlannerConfig (target zones, defaults, etc.)
+            config: PlannerConfig (target zones, defaults, user_profile etc.)
             model_handle: opcjonalnie konkretny handle do modelu
                           (default: globalny z models_wrapper.get_model())
             exercise_catalog: metadata ćwiczeń {ex_id: {type, time_sec}}
                               (default: DEFAULT_EXERCISE_CATEGORIES)
+
+        Uwaga dotycząca UserProfile:
+          - Jeśli config.user_profile jest ustawiony, a aktualny model to Mock,
+            reinicjalizujemy Mock z odpowiednim tau_scale.
+          - Dla real DeepGain model tau są zaszyte w checkpoincie i nie są
+            skalowane tu (kalibracja per-user wymagałaby fine-tuningu modelu).
         """
         self.config = config
+
+        # Jeśli user_profile i używamy Mock → reinicjalizuj z nowym tau_scale
+        if (
+            config.user_profile is not None
+            and model_handle is None
+            and not models_wrapper.is_using_real_model()
+        ):
+            tau_scale = config.get_tau_scale()
+            if abs(tau_scale - 1.0) > 0.01:  # Tylko jeśli różne od baseline
+                logger.info(
+                    f"Reinitializing Mock model with tau_scale={tau_scale:.2f} "
+                    f"(user_profile: experience={config.user_profile.experience_level}, "
+                    f"age={config.user_profile.age_years})"
+                )
+                models_wrapper.initialize_model(force_mock=True, tau_scale=tau_scale)
+
         self.model = model_handle or models_wrapper.get_model()
         self.using_real_model = models_wrapper.is_using_real_model()
 
@@ -208,10 +230,13 @@ class WorkoutPlanner:
 
         logger.info(f"\n=== Planning: {n_compound}C + {n_isolation}I, time={available_time_sec}s ===")
 
+        # Volume tracking (per muscle dla session-level limits)
+        current_volume_per_muscle: Dict[str, float] = defaultdict(float)
+
         # Phase 1: Compound (N ćwiczeń × sets_count serii)
         logger.info(f"\n--- Phase 1: Compound ({n_compound} exercises) ---")
         for i in range(n_compound):
-            exercise_sets, new_state, new_time = self._select_and_expand_exercise(
+            exercise_sets, new_state, new_time, volume_delta = self._select_and_expand_exercise(
                 candidate_pool=self.compound_exercises,
                 current_state=current_state,
                 used_exercises=used_exercises,
@@ -223,6 +248,7 @@ class WorkoutPlanner:
                 preferences=preferences,
                 start_order=len(plan) + 1,
                 time_offset=total_time,
+                current_volume_per_muscle=dict(current_volume_per_muscle),
             )
 
             if not exercise_sets:
@@ -232,12 +258,14 @@ class WorkoutPlanner:
             plan.extend(exercise_sets)
             used_exercises.add(exercise_sets[0].exercise_id)
 
-            # Update state & history (wszystkie serie tego ćwiczenia)
+            # Update state, history, volume
             for ps in exercise_sets:
                 ws = ps.to_workout_set(timestamp=now + timedelta(seconds=total_time))
                 current_history.append(ws)
                 total_time += ps.estimated_time_sec + self.config.rest_between_sets_sec
             current_state = new_state
+            for m, v in volume_delta.items():
+                current_volume_per_muscle[m] += v
 
             first_set = exercise_sets[0]
             logger.info(
@@ -248,7 +276,7 @@ class WorkoutPlanner:
         # Phase 2: Isolation
         logger.info(f"\n--- Phase 2: Isolation ({n_isolation} exercises) ---")
         for i in range(n_isolation):
-            exercise_sets, new_state, new_time = self._select_and_expand_exercise(
+            exercise_sets, new_state, new_time, volume_delta = self._select_and_expand_exercise(
                 candidate_pool=self.isolation_exercises,
                 current_state=current_state,
                 used_exercises=used_exercises,
@@ -260,6 +288,7 @@ class WorkoutPlanner:
                 preferences=preferences,
                 start_order=len(plan) + 1,
                 time_offset=total_time,
+                current_volume_per_muscle=dict(current_volume_per_muscle),
             )
 
             if not exercise_sets:
@@ -274,6 +303,8 @@ class WorkoutPlanner:
                 current_history.append(ws)
                 total_time += ps.estimated_time_sec + self.config.rest_between_sets_sec
             current_state = new_state
+            for m, v in volume_delta.items():
+                current_volume_per_muscle[m] += v
 
             first_set = exercise_sets[0]
             logger.info(
@@ -284,7 +315,7 @@ class WorkoutPlanner:
         # Phase 3: Core (always last, only if time)
         if total_time < available_time_sec and self.core_exercises:
             logger.info(f"\n--- Phase 3: Core ---")
-            exercise_sets, new_state, new_time = self._select_and_expand_exercise(
+            exercise_sets, new_state, new_time, volume_delta = self._select_and_expand_exercise(
                 candidate_pool=self.core_exercises,
                 current_state=current_state,
                 used_exercises=used_exercises,
@@ -296,6 +327,7 @@ class WorkoutPlanner:
                 preferences=preferences,
                 start_order=len(plan) + 1,
                 time_offset=total_time,
+                current_volume_per_muscle=dict(current_volume_per_muscle),
             )
 
             if exercise_sets:
@@ -307,6 +339,8 @@ class WorkoutPlanner:
                     current_history.append(ws)
                     total_time += ps.estimated_time_sec + self.config.rest_between_sets_sec
                 current_state = new_state
+                for m, v in volume_delta.items():
+                    current_volume_per_muscle[m] += v
 
                 logger.info(f"  [Core] {exercise_sets[0].exercise_id}: {len(exercise_sets)} sets")
 
@@ -383,9 +417,21 @@ class WorkoutPlanner:
         working_state = dict(current_state)
         working_history = list(combined_history)
 
+        # Volume tracking (już wykonane serie liczą się do limitu)
+        working_volume_per_muscle: Dict[str, float] = defaultdict(float)
+        for ps in session_so_far:
+            vol_delta = self._calculate_volume_delta(
+                exercise_id=ps.exercise_id,
+                weight_kg=ps.weight_kg,
+                reps=ps.reps,
+                sets_count=1,  # To jeden set (nie multi-set block)
+            )
+            for m, v in vol_delta.items():
+                working_volume_per_muscle[m] += v
+
         # Compound
         for i in range(remaining_n_compound):
-            exercise_sets, new_state, _ = self._select_and_expand_exercise(
+            exercise_sets, new_state, _, volume_delta = self._select_and_expand_exercise(
                 candidate_pool=self.compound_exercises,
                 current_state=working_state,
                 used_exercises=used_exercises,
@@ -397,6 +443,7 @@ class WorkoutPlanner:
                 preferences=preferences,
                 start_order=len(session_so_far) + len(new_plan) + 1,
                 time_offset=total_time,
+                current_volume_per_muscle=dict(working_volume_per_muscle),
             )
             if not exercise_sets:
                 break
@@ -409,12 +456,14 @@ class WorkoutPlanner:
                 working_history.append(ws)
                 total_time += ps.estimated_time_sec + self.config.rest_between_sets_sec
             working_state = new_state
+            for m, v in volume_delta.items():
+                working_volume_per_muscle[m] += v
 
             logger.info(f"  [+] {exercise_sets[0].exercise_id}: {len(exercise_sets)} sets (compound)")
 
         # Isolation
         for i in range(remaining_n_isolation):
-            exercise_sets, new_state, _ = self._select_and_expand_exercise(
+            exercise_sets, new_state, _, volume_delta = self._select_and_expand_exercise(
                 candidate_pool=self.isolation_exercises,
                 current_state=working_state,
                 used_exercises=used_exercises,
@@ -426,6 +475,7 @@ class WorkoutPlanner:
                 preferences=preferences,
                 start_order=len(session_so_far) + len(new_plan) + 1,
                 time_offset=total_time,
+                current_volume_per_muscle=dict(working_volume_per_muscle),
             )
             if not exercise_sets:
                 break
@@ -438,12 +488,14 @@ class WorkoutPlanner:
                 working_history.append(ws)
                 total_time += ps.estimated_time_sec + self.config.rest_between_sets_sec
             working_state = new_state
+            for m, v in volume_delta.items():
+                working_volume_per_muscle[m] += v
 
             logger.info(f"  [+] {exercise_sets[0].exercise_id}: {len(exercise_sets)} sets (isolation)")
 
         # Core (jeśli czas)
         if total_time < available_time_sec and self.core_exercises:
-            exercise_sets, new_state, _ = self._select_and_expand_exercise(
+            exercise_sets, new_state, _, volume_delta = self._select_and_expand_exercise(
                 candidate_pool=self.core_exercises,
                 current_state=working_state,
                 used_exercises=used_exercises,
@@ -455,6 +507,7 @@ class WorkoutPlanner:
                 preferences=preferences,
                 start_order=len(session_so_far) + len(new_plan) + 1,
                 time_offset=total_time,
+                current_volume_per_muscle=dict(working_volume_per_muscle),
             )
             if exercise_sets:
                 new_plan.extend(exercise_sets)
@@ -526,23 +579,26 @@ class WorkoutPlanner:
         preferences: Dict,
         start_order: int,
         time_offset: int,
-    ) -> Tuple[List[PlannedSet], Dict[str, float], int]:
+        current_volume_per_muscle: Optional[Dict[str, float]] = None,
+    ) -> Tuple[List[PlannedSet], Dict[str, float], int, Dict[str, float]]:
         """
-        Wybiera NAJLEPSZE ćwiczenie i generuje N serii tego ćwiczenia.
+        Wybiera NAJLEPSZE ćwiczenie (lub jedno z top-K) i generuje N serii.
+
+        Uwzględnia:
+          - Volume limits per muscle (z config) - odrzuca kandydatów przekraczających limity
+          - Beam search z exploration_temperature - soft sampling z top-K
 
         Returns:
-            (lista PlannedSetów [N serii], predicted_mpc_after, total_time_added)
+            (lista PlannedSetów, predicted_mpc_after, total_time_added, volume_delta)
             Pustą listę jeśli nic nie znaleziono.
         """
-        best_score = -float('inf')
-        best_exercise_id = None
-        best_sets_list = None
-        best_final_state = current_state
-
         favorite_set = set(preferences.get("favorites", []))
         avoid_set = set(preferences.get("avoid", []))
-
         rest_sec = self.config.rest_between_sets_sec
+        current_volume_per_muscle = current_volume_per_muscle or {}
+
+        # Zbierz wszystkich valid kandydatów z ich scores
+        candidates = []  # List of (score, ex_id, planned_sets, final_mpc, volume_delta)
 
         for ex_id in candidate_pool:
             if ex_id in used_exercises or ex_id in exclusions:
@@ -553,7 +609,7 @@ class WorkoutPlanner:
             time_per_set = meta.get("time_sec", 120)
             sets_count = self.config.get_sets_count(ex_type)
 
-            # Czas całkowity: sets × time + (sets-1) × rest
+            # Czas całkowity
             total_block_time = sets_count * time_per_set + (sets_count - 1) * rest_sec
             if total_block_time > remaining_time:
                 # Spróbuj zmniejszyć liczbę serii
@@ -564,14 +620,34 @@ class WorkoutPlanner:
                 if sets_count < 1:
                     continue
 
-            # Wybierz weight i reps (pod target RIR dla fresh state)
+            # Stwórz prototype
             candidate_prototype = self._construct_planned_set(
                 exercise_id=ex_id,
                 estimated_1rm=estimated_1rm,
                 current_state=current_state,
             )
 
-            # Generuj N PlannedSetów (te same parametry dla każdej serii)
+            # ===== VOLUME LIMITS CHECK =====
+            # Oblicz volume delta per muscle dla tego ćwiczenia (wszystkie serie)
+            volume_delta = self._calculate_volume_delta(
+                exercise_id=ex_id,
+                weight_kg=candidate_prototype.weight_kg,
+                reps=candidate_prototype.reps,
+                sets_count=sets_count,
+            )
+
+            # Sprawdź czy nie przekroczymy volume limits dla któregokolwiek mięśnia
+            volume_violation = False
+            for muscle_id, delta in volume_delta.items():
+                current_vol = current_volume_per_muscle.get(muscle_id, 0.0)
+                limit = self.config.get_volume_limit(muscle_id)
+                if current_vol + delta > limit:
+                    volume_violation = True
+                    break
+            if volume_violation:
+                continue  # Skip - przekroczyłby limit
+
+            # Generuj N PlannedSetów
             candidate_sets = []
             for set_idx in range(sets_count):
                 ps = PlannedSet(
@@ -587,7 +663,7 @@ class WorkoutPlanner:
                 )
                 candidate_sets.append(ps)
 
-            # Symuluj: dodaj wszystkie serie do history → predict_mpc
+            # Symuluj
             test_history = list(current_history)
             sim_time = time_offset
             for ps in candidate_sets:
@@ -606,19 +682,89 @@ class WorkoutPlanner:
                 should_avoid=ex_id in avoid_set,
             )
 
-            if score > best_score:
-                best_score = score
-                best_exercise_id = ex_id
-                best_sets_list = candidate_sets
-                best_final_state = predicted_mpc
+            candidates.append((score, ex_id, candidate_sets, predicted_mpc, volume_delta))
 
-        if best_sets_list is None:
-            return [], current_state, 0
+        if not candidates:
+            return [], current_state, 0, {}
+
+        # ===== BEAM SEARCH SELECTION =====
+        # Posortuj malejąco po score
+        candidates.sort(key=lambda c: c[0], reverse=True)
+
+        # Weź top-K (beam_width)
+        top_k = candidates[:self.config.beam_width]
+
+        # Wybierz:
+        #   - temperature = 0 → zawsze top-1 (greedy)
+        #   - temperature > 0 → softmax sampling
+        selected = self._beam_search_select(top_k)
+
+        _, _, best_sets_list, best_final_state, best_volume_delta = selected
 
         total_block_time = sum(ps.estimated_time_sec for ps in best_sets_list) + \
                            (len(best_sets_list) - 1) * rest_sec
 
-        return best_sets_list, best_final_state, total_block_time
+        return best_sets_list, best_final_state, total_block_time, best_volume_delta
+
+    def _beam_search_select(
+        self,
+        top_k_candidates: List[Tuple],
+    ) -> Tuple:
+        """
+        Beam search: wybierz kandydata z top-K.
+
+        Jeśli exploration_temperature == 0: deterministic, zawsze top-1.
+        Jeśli > 0: softmax sampling z prawdopodobieństwami ∝ exp(score / temp).
+        """
+        if not top_k_candidates:
+            return None
+
+        temp = self.config.exploration_temperature
+
+        if temp <= 0.0 or len(top_k_candidates) == 1:
+            # Greedy
+            return top_k_candidates[0]
+
+        # Softmax sampling
+        import random
+        import math as _math
+
+        scores = [c[0] for c in top_k_candidates]
+        max_score = max(scores)
+        # Normalizuj żeby uniknąć overflow
+        exp_scores = [_math.exp((s - max_score) / temp) for s in scores]
+        total = sum(exp_scores)
+        probs = [e / total for e in exp_scores]
+
+        # Sample
+        r = random.random()
+        cumulative = 0.0
+        for i, p in enumerate(probs):
+            cumulative += p
+            if r <= cumulative:
+                return top_k_candidates[i]
+
+        return top_k_candidates[-1]  # fallback
+
+    def _calculate_volume_delta(
+        self,
+        exercise_id: str,
+        weight_kg: float,
+        reps: int,
+        sets_count: int,
+    ) -> Dict[str, float]:
+        """
+        Oblicz volume load (weight × reps × engagement) per muscle
+        jakie zostanie dodane przez wykonanie wszystkich serii tego ćwiczenia.
+        """
+        involvement = self._get_involvement(exercise_id)
+        delta = {}
+        for muscle_id, engagement_ratio in involvement.items():
+            # Bodyweight exercises have weight_kg=0, użyj szacunku 40kg jako "fake load"
+            effective_weight = max(weight_kg, 40.0) if weight_kg == 0.0 else weight_kg
+            volume = effective_weight * reps * sets_count * engagement_ratio
+            delta[muscle_id] = volume
+        return delta
 
     def _calculate_score(
         self,
@@ -633,41 +779,60 @@ class WorkoutPlanner:
 
         Score = Reward - Penalty + Preferences
 
-        Reward:
+        Reward (NORMALIZED to fix deadlift dominance):
             Priorytet dla ćwiczeń które angażują ŚWIEŻE mięśnie (wysoki MPC_before).
-            Im większe zaangażowanie × im większa capacity przed, tym lepszy reward.
+            Używamy WAŻONEJ ŚREDNIEJ zamiast sumy:
+                reward = Σ(engagement × capacity_before) / Σ(engagement)
+            Dzięki temu deadlift (wiele mięśni) nie wygrywa automatycznie
+            nad bench_press (mniej mięśni, ale wysokie engagement).
 
         Penalty:
-            Za mięśnie, które po dodaniu tego ćwiczenia znajdą się POZA target zone.
-            OVERFATIGUE (MPC_after < target_min): duża kara (ryzyko kontuzji)
-            UNDERFATIGUE (MPC_after > target_max): mniejsza kara (strata potencjału)
+            (a) OVERFATIGUE (MPC_after < target_min): duża kara (ryzyko kontuzji)
+            (b) UNDERFATIGUE (MPC_after > target_max): mniejsza kara (strata potencjału)
         """
         involvement = self._get_involvement(exercise_id)
 
-        reward = 0.0
+        # Reward: WAŻONA ŚREDNIA capacity (nie suma!)
+        # To zapobiega dominacji ćwiczeń angażujących wiele mięśni
+        total_engagement = sum(involvement.values())
+        if total_engagement > 0:
+            reward = sum(
+                ratio * current_state.get(muscle_id, 1.0)
+                for muscle_id, ratio in involvement.items()
+            ) / total_engagement
+        else:
+            reward = 0.0
+
+        # Drobny bonus za zaangażowanie kilku mięśni (sweet spot: 2-3).
+        # Ale NIE skalujemy dalej — zbyt szerokie ćwiczenia (deadlift, 7 mięśni)
+        # byłyby niesprawiedliwie preferowane w fresh state.
+        n_muscles_engaged = sum(1 for r in involvement.values() if r >= 0.2)
+        if n_muscles_engaged == 2:
+            breadth_bonus = 0.02
+        elif n_muscles_engaged == 3:
+            breadth_bonus = 0.04
+        elif n_muscles_engaged >= 4:
+            breadth_bonus = 0.03  # Nie rośnie dalej — zapobiega dominacji
+        else:
+            breadth_bonus = 0.0
+
+        reward += breadth_bonus
+
+        # Penalty
         penalty = 0.0
-
         for muscle_id, ratio in involvement.items():
-            mpc_before = current_state.get(muscle_id, 1.0)  # Default: fresh
             mpc_after = predicted_mpc.get(muscle_id, 1.0)
-
-            # Reward: świeże mięśnie zaangażowane w ćwiczeniu
-            # MPC = capacity, więc wysoki MPC_before = świeży
-            reward += ratio * mpc_before
-
-            # Penalty: poza target zone
             target_zone = self.config.get_target_zone(muscle_id)
             target_min, target_max = target_zone
 
             if mpc_after < target_min:
                 # OVERFATIGUE - niebezpieczne
                 overfatigue = target_min - mpc_after
-                penalty += 2.0 * overfatigue  # Wysoka kara
+                penalty += 2.0 * overfatigue
             elif mpc_after > target_max:
-                # UNDERFATIGUE - stracona szansa na bodziec
-                underfatigue = mpc_after - target_max
-                # Tylko jeśli mięsień BYŁ zaangażowany (ratio > 0)
+                # UNDERFATIGUE - tylko jeśli był zaangażowany
                 if ratio > 0.1:
+                    underfatigue = mpc_after - target_max
                     penalty += 0.3 * underfatigue
 
         score = reward - penalty

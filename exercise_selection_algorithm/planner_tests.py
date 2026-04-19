@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timedelta
 
 from data_structures import (
-    WorkoutSet, PlannerConfig,
+    WorkoutSet, PlannerConfig, UserProfile,
     DEFAULT_TARGET_CAPACITY_ZONES, DEFAULT_DEFAULT_REPS_BY_TYPE,
 )
 from planner import WorkoutPlanner
@@ -427,8 +427,216 @@ def test_exclusions_and_preferences():
 
 
 # ============================================================================
-# MAIN
+# TEST 9: Deadlift Dominance Fix — Weighted Avg Reward
 # ============================================================================
+def test_deadlift_dominance_fix():
+    logger.info("\n" + "="*70)
+    logger.info("TEST 9: Deadlift Dominance Fix (ważona średnia zamiast sumy)")
+    logger.info("="*70)
+
+    planner = make_planner()
+    fresh_state = {m: 1.0 for m in planner.all_muscles}
+
+    # Zaplanuj wiele razy, sprawdź czy nie zawsze jest deadlift first
+    deadlift_first_count = 0
+    first_exercises = []
+
+    for _ in range(5):
+        result = planner.plan(
+            state=fresh_state,
+            n_compound=2,
+            n_isolation=1,
+            available_time_sec=3600,
+        )
+        first_ex = result.plan[0].exercise_id if result.plan else None
+        first_exercises.append(first_ex)
+        if first_ex in ("deadlift", "sumo_deadlift"):
+            deadlift_first_count += 1
+
+    logger.info(f"\n  First exercises across 5 runs: {first_exercises}")
+    logger.info(f"  Deadlift-family as #1: {deadlift_first_count}/5")
+    logger.info(f"  {'✓ Fixed' if deadlift_first_count < 5 else '⚠ Still dominated'}")
+
+
+# ============================================================================
+# TEST 10: Beam Search (exploration_temperature)
+# ============================================================================
+def test_beam_search_exploration():
+    logger.info("\n" + "="*70)
+    logger.info("TEST 10: Beam Search Exploration (różne plany per call)")
+    logger.info("="*70)
+
+    # High exploration temperature → większa różnorodność
+    models_wrapper.initialize_model(force_mock=True)
+    config = PlannerConfig(
+        target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+        default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+        target_rir=2,
+        exploration_temperature=0.5,   # Włączona eksploracja
+        beam_width=3,
+    )
+    planner = WorkoutPlanner(config)
+    fresh_state = {m: 1.0 for m in planner.all_muscles}
+
+    unique_plans = set()
+    for run in range(8):
+        result = planner.plan(
+            state=fresh_state,
+            n_compound=2,
+            n_isolation=2,
+            available_time_sec=3600,
+        )
+        # Unikalny fingerprint planu: set unikalnych exercise_id
+        plan_fingerprint = tuple(sorted(set(s.exercise_id for s in result.plan)))
+        unique_plans.add(plan_fingerprint)
+
+    logger.info(f"\n  Unique plan fingerprints across 8 runs (temp=0.5): {len(unique_plans)}")
+    for fp in unique_plans:
+        logger.info(f"    {fp}")
+
+    # Porównaj z temperature=0 (greedy, powinny być identyczne)
+    config_greedy = PlannerConfig(
+        target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+        default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+        target_rir=2,
+        exploration_temperature=0.0,
+    )
+    planner_greedy = WorkoutPlanner(config_greedy)
+    greedy_plans = set()
+    for _ in range(3):
+        result = planner_greedy.plan(
+            state=fresh_state, n_compound=2, n_isolation=2,
+            available_time_sec=3600,
+        )
+        fp = tuple(sorted(set(s.exercise_id for s in result.plan)))
+        greedy_plans.add(fp)
+
+    logger.info(f"\n  Greedy (temp=0): unique plans across 3 runs = {len(greedy_plans)}")
+    logger.info(f"  {'✓ Diverse planning works' if len(unique_plans) > 1 else '⚠ Still deterministic'}")
+    logger.info(f"  {'✓ Greedy is deterministic' if len(greedy_plans) == 1 else '⚠ Greedy not deterministic'}")
+
+
+# ============================================================================
+# TEST 11: Volume Limits
+# ============================================================================
+def test_volume_limits():
+    logger.info("\n" + "="*70)
+    logger.info("TEST 11: Volume Limits Per Muscle")
+    logger.info("="*70)
+
+    # Bardzo niski volume limit → planer powinien unikać ciężkich ćwiczeń
+    models_wrapper.initialize_model(force_mock=True)
+    custom_limits = {
+        "quads": 500.0,       # Bardzo niski (normalnie 5000)
+        "hamstrings": 500.0,
+        "glutes": 500.0,
+    }
+    config = PlannerConfig(
+        target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+        default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+        volume_limit_per_muscle=custom_limits,
+    )
+    planner = WorkoutPlanner(config)
+    fresh_state = {m: 1.0 for m in planner.all_muscles}
+
+    result = planner.plan(
+        state=fresh_state,
+        n_compound=2,
+        n_isolation=3,
+        available_time_sec=3600,
+    )
+
+    # Zlicz volume leg-related
+    leg_muscles = ["quads", "hamstrings", "glutes"]
+    volume_per_muscle = {m: 0.0 for m in leg_muscles}
+
+    for ps in result.plan:
+        delta = planner._calculate_volume_delta(
+            exercise_id=ps.exercise_id,
+            weight_kg=ps.weight_kg,
+            reps=ps.reps,
+            sets_count=1,
+        )
+        for m in leg_muscles:
+            volume_per_muscle[m] += delta.get(m, 0.0)
+
+    logger.info(f"\n  Leg volumes z limitem 500 kg-reps:")
+    for m, v in volume_per_muscle.items():
+        status = "✓ under limit" if v <= 500.0 else "✗ OVER limit"
+        logger.info(f"    {m}: {v:.0f} / 500  {status}")
+
+    logger.info(f"\n  Plan (powinno być mało/brak heavy leg):")
+    unique = set()
+    for ps in result.plan:
+        if ps.exercise_id not in unique:
+            unique.add(ps.exercise_id)
+            count = sum(1 for x in result.plan if x.exercise_id == ps.exercise_id)
+            logger.info(f"    - {ps.exercise_id} × {count} sets")
+
+
+# ============================================================================
+# TEST 12: UserProfile → tau calibration
+# ============================================================================
+def test_user_profile_tau():
+    logger.info("\n" + "="*70)
+    logger.info("TEST 12: UserProfile → Tau Calibration (per-user regeneracja)")
+    logger.info("="*70)
+
+    # Scenariusz: 2 userów robi identyczny trening, mierzymy MPC po 12h
+    now = datetime.now()
+    history_12h_ago = [
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=now - timedelta(hours=12)),
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=now - timedelta(hours=12, minutes=-3)),
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=now - timedelta(hours=12, minutes=-6)),
+    ]
+
+    # User 1: Beginner, age 60 (wolna regeneracja)
+    beginner_profile = UserProfile(
+        experience_level="beginner",
+        age_years=60,
+        recovery_factor=1.0,
+    )
+    models_wrapper.initialize_model(force_mock=True, tau_scale=1.0)  # Reset
+    config_beginner = PlannerConfig(
+        target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+        default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+        user_profile=beginner_profile,
+    )
+    planner_beg = WorkoutPlanner(config_beginner)
+    mpc_beginner = planner_beg._call_predict_mpc(history_12h_ago, now)
+
+    # User 2: Advanced, age 22 (szybka regeneracja)
+    advanced_profile = UserProfile(
+        experience_level="advanced",
+        age_years=22,
+        recovery_factor=1.0,
+    )
+    models_wrapper.initialize_model(force_mock=True, tau_scale=1.0)  # Reset
+    config_advanced = PlannerConfig(
+        target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+        default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+        user_profile=advanced_profile,
+    )
+    planner_adv = WorkoutPlanner(config_advanced)
+    mpc_advanced = planner_adv._call_predict_mpc(history_12h_ago, now)
+
+    logger.info(f"\n  User 1 (Beginner, 60 lat): tau_scale={beginner_profile.get_tau_scale():.2f}")
+    logger.info(f"  User 2 (Advanced, 22 lata): tau_scale={advanced_profile.get_tau_scale():.2f}")
+
+    logger.info(f"\n  MPC po 12h (po identycznym leg day):")
+    for muscle in ["quads", "hamstrings", "glutes"]:
+        v1 = mpc_beginner[muscle]
+        v2 = mpc_advanced[muscle]
+        logger.info(f"    {muscle}:  Beginner={v1:.3f}  Advanced={v2:.3f}  diff={v2-v1:+.3f}")
+
+    # Weryfikacja: advanced powinien mieć WYŻSZE capacity (szybsza regeneracja)
+    all_advanced_higher = all(
+        mpc_advanced[m] > mpc_beginner[m] for m in ["quads", "hamstrings", "glutes"]
+    )
+    logger.info(f"\n  {'✓ Advanced recovers faster (expected)' if all_advanced_higher else '⚠ Unexpected ordering'}")
+
+    # Reset do default na koniec
+    models_wrapper.initialize_model(force_mock=True, tau_scale=1.0)
 def run_all_tests():
     logger.info("\n\n" + "#"*70)
     logger.info("# RUNNING ALL TESTS")
@@ -442,6 +650,11 @@ def run_all_tests():
     test_with_user_history()
     test_target_zones()
     test_exclusions_and_preferences()
+    # Nowe testy (improvements #1-#4)
+    test_deadlift_dominance_fix()
+    test_beam_search_exploration()
+    test_volume_limits()
+    test_user_profile_tau()
 
     logger.info("\n\n" + "#"*70)
     logger.info("# ✓ ALL TESTS COMPLETED")

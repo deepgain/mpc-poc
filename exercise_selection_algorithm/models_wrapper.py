@@ -88,6 +88,7 @@ _USING_REAL_MODEL = False
 def initialize_model(
     checkpoint_path: str = "deepgain_model_muscle_ord.pt",
     force_mock: bool = False,
+    tau_scale: float = 1.0,
 ) -> "ModelHandle":
     """
     Załaduj model (real lub mock).
@@ -95,6 +96,8 @@ def initialize_model(
     Args:
         checkpoint_path: Ścieżka do .pt file z wag modelu Michała
         force_mock: Jeśli True, wymusza użycie mock modelu
+        tau_scale: Skala tau dla MockModel (user calibration).
+                   Real DeepGain używa własnych tau z checkpointa.
 
     Returns:
         Handle do modelu (opakowany)
@@ -102,16 +105,16 @@ def initialize_model(
     global _MODEL_INSTANCE, _USING_REAL_MODEL
 
     if force_mock or not _REAL_MODEL_AVAILABLE:
-        logger.info("Using MockModel (fallback)")
-        _MODEL_INSTANCE = MockModelHandle()
+        logger.info(f"Using MockModel (fallback, tau_scale={tau_scale})")
+        _MODEL_INSTANCE = MockModelHandle(tau_scale=tau_scale)
         _USING_REAL_MODEL = False
         return _MODEL_INSTANCE
 
     # Sprawdź dostępność pliku checkpoint
     if not os.path.exists(checkpoint_path):
         logger.warning(f"⚠ Checkpoint not found: {checkpoint_path}")
-        logger.warning("  Falling back to MockModel")
-        _MODEL_INSTANCE = MockModelHandle()
+        logger.warning(f"  Falling back to MockModel (tau_scale={tau_scale})")
+        _MODEL_INSTANCE = MockModelHandle(tau_scale=tau_scale)
         _USING_REAL_MODEL = False
         return _MODEL_INSTANCE
 
@@ -122,8 +125,8 @@ def initialize_model(
         _USING_REAL_MODEL = True
     except Exception as e:
         logger.error(f"✗ Failed to load real model: {e}")
-        logger.warning("  Falling back to MockModel")
-        _MODEL_INSTANCE = MockModelHandle()
+        logger.warning(f"  Falling back to MockModel (tau_scale={tau_scale})")
+        _MODEL_INSTANCE = MockModelHandle(tau_scale=tau_scale)
         _USING_REAL_MODEL = False
 
     return _MODEL_INSTANCE
@@ -203,11 +206,19 @@ class MockModelHandle(ModelHandle):
     Model:
       1. Zacznij z MPC = 1.0 dla wszystkich
       2. Dla każdej serii w historii (posortowanej po czasie):
-         a. Apply recovery: MPC_new = 1 - (1 - MPC) * exp(-dt/tau)
+         a. Apply recovery: MPC_new = 1 - (1 - MPC) * exp(-dt/(tau*tau_scale))
          b. Apply fatigue: MPC_new = MPC * (1 - involvement * drop)
             gdzie drop = f(reps, rir, weight)
       3. Final recovery od ostatniej serii do timestamp
+
+    tau_scale:
+      - 1.0 = baseline (default)
+      - <1 = szybsza regeneracja (e.g., 0.85 dla advanced)
+      - >1 = wolniejsza regeneracja (e.g., 1.2 dla beginner / starszy user)
     """
+
+    def __init__(self, tau_scale: float = 1.0):
+        self.tau_scale = tau_scale
 
     # Time constants regeneracji (hours) - jak w inference.py Michała
     MUSCLE_TAU = {
@@ -421,12 +432,14 @@ class MockModelHandle(ModelHandle):
 
     def _apply_recovery(self, mpc: Dict[str, float], dt_hours: float) -> Dict[str, float]:
         """
-        Recovery: MPC_new = 1 - (1 - MPC) * exp(-dt / tau)
+        Recovery: MPC_new = 1 - (1 - MPC) * exp(-dt / (tau * tau_scale))
         (Im dłużej, tym bliżej 1.0)
+
+        tau_scale skaluje regeneracje per user (z UserProfile)
         """
         new_mpc = {}
         for muscle, current in mpc.items():
-            tau = self.MUSCLE_TAU.get(muscle, 12.0)
+            tau = self.MUSCLE_TAU.get(muscle, 12.0) * self.tau_scale
             new_mpc[muscle] = 1.0 - (1.0 - current) * math.exp(-dt_hours / tau)
         return new_mpc
 

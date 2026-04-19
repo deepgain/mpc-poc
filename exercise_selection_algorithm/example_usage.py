@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta
 
 from data_structures import (
-    WorkoutSet, PlannerConfig,
+    WorkoutSet, PlannerConfig, UserProfile,
     DEFAULT_TARGET_CAPACITY_ZONES, DEFAULT_DEFAULT_REPS_BY_TYPE,
 )
 from planner import WorkoutPlanner
@@ -297,8 +297,136 @@ def example6_model_status():
 
 
 # ============================================================================
-# MAIN
+# EXAMPLE 7: Beam Search — Różne Plany Za Każdym Razem
 # ============================================================================
+def example7_beam_search():
+    print("\n\n" + "="*70)
+    print("EXAMPLE 7: Beam Search — Różnorodność Planów")
+    print("="*70)
+
+    # Z eksploracją: różne plany przy każdym wywołaniu
+    models_wrapper.initialize_model()
+
+    config = PlannerConfig(
+        target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+        default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+        exploration_temperature=0.5,  # <-- eksploracja (0 = greedy, >0 = różnorodność)
+        beam_width=3,
+    )
+    planner = WorkoutPlanner(config)
+    fresh_state = {m: 1.0 for m in planner.all_muscles}
+
+    print(f"\nGenerujemy 3 plany z tym samym input state (temp=0.5):\n")
+    for i in range(3):
+        result = planner.plan(
+            state=fresh_state, n_compound=2, n_isolation=2,
+            available_time_sec=3600,
+        )
+        unique_ex = list(dict.fromkeys(s.exercise_id for s in result.plan))
+        print(f"  Plan #{i+1}: {unique_ex}")
+
+
+# ============================================================================
+# EXAMPLE 8: Volume Limits — Kontuzja Kolan, Niski Limit Na Nogi
+# ============================================================================
+def example8_volume_limits():
+    print("\n\n" + "="*70)
+    print("EXAMPLE 8: Volume Limits — Rekonwalescent Kolan")
+    print("="*70)
+
+    models_wrapper.initialize_model()
+
+    # Scenariusz: user wraca po kontuzji, chce chronić nogi
+    custom_limits = {
+        "quads": 1000.0,        # Niski limit (default: 5000)
+        "hamstrings": 800.0,
+        "glutes": 1200.0,
+        # Reszta mięśni — default limits (wysokie)
+    }
+    config = PlannerConfig(
+        target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+        default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+        volume_limit_per_muscle=custom_limits,
+    )
+    planner = WorkoutPlanner(config)
+    fresh_state = {m: 1.0 for m in planner.all_muscles}
+
+    result = planner.plan(
+        state=fresh_state, n_compound=2, n_isolation=3,
+        available_time_sec=3600,
+    )
+
+    print(f"\n📋 Plan z niskim limitem na nogi:")
+    unique = {}
+    for s in result.plan:
+        unique.setdefault(s.exercise_id, []).append(s)
+    for ex, sets in unique.items():
+        first = sets[0]
+        print(f"  - {ex}: {len(sets)}×{first.reps}@{first.weight_kg}kg")
+
+    # Oblicz rzeczywiste volume na nogi
+    print(f"\n📊 Volume na nogi:")
+    for muscle, limit in custom_limits.items():
+        total_vol = 0
+        for s in result.plan:
+            delta = planner._calculate_volume_delta(s.exercise_id, s.weight_kg, s.reps, 1)
+            total_vol += delta.get(muscle, 0)
+        status = "✓" if total_vol <= limit else "✗"
+        print(f"  {status} {muscle}: {total_vol:.0f} / {limit:.0f}")
+
+
+# ============================================================================
+# EXAMPLE 9: UserProfile — Per-User Recovery Calibration
+# ============================================================================
+def example9_user_profile():
+    print("\n\n" + "="*70)
+    print("EXAMPLE 9: UserProfile — Personalizacja Regeneracji")
+    print("="*70)
+
+    # Porównanie: 2 userów, ten sam trening, różne profile
+    now = datetime.now()
+    shared_history = [
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=now - timedelta(hours=12)),
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=now - timedelta(hours=12)),
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=now - timedelta(hours=12)),
+    ]
+
+    profiles = [
+        ("Początkujący, 55 lat", UserProfile(
+            experience_level="beginner", age_years=55)),
+        ("Średniozaawansowany, 30 lat", UserProfile(
+            experience_level="intermediate", age_years=30)),
+        ("Zaawansowany, 22 lata", UserProfile(
+            experience_level="advanced", age_years=22)),
+    ]
+
+    print(f"\n💪 MPC po 12h od leg day (squat 3×5 @ 100kg):")
+    print(f"{'Profil':<35} {'tau_scale':<12} {'quads':<8} {'hamstrings':<10} {'glutes':<8}")
+    print("-" * 75)
+
+    for desc, profile in profiles:
+        models_wrapper.initialize_model(force_mock=True)  # Reset
+        config = PlannerConfig(
+            target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+            default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+            user_profile=profile,
+        )
+        planner = WorkoutPlanner(config)
+
+        mpc = planner._call_predict_mpc(shared_history, now)
+        tau_scale = profile.get_tau_scale()
+
+        print(f"{desc:<35} "
+              f"{tau_scale:<12.2f} "
+              f"{mpc['quads']:<8.3f} "
+              f"{mpc['hamstrings']:<10.3f} "
+              f"{mpc['glutes']:<8.3f}")
+
+    print(f"\n💡 Wniosek: zaawansowani mają wyższy MPC (szybsza regeneracja), co pozwala")
+    print(f"   planerowi bardziej agresywnie planować ich następne treningi.")
+
+    # Reset
+    models_wrapper.initialize_model(force_mock=True)
 if __name__ == '__main__':
     print("\n\n🏋️  WorkoutPlanner v2 — Przykłady Użycia (DeepGain Integration)\n")
 
@@ -308,6 +436,10 @@ if __name__ == '__main__':
     example3_replanning()
     example4_short_session()
     example5_with_history()
+    # Nowe przykłady (improvements)
+    example7_beam_search()
+    example8_volume_limits()
+    example9_user_profile()
 
     print("\n\n" + "="*70)
     print("✅ Wszystkie przykłady zakończone!")

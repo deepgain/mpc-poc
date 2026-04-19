@@ -110,6 +110,62 @@ class PlanResult:
 
 
 @dataclass
+class UserProfile:
+    """
+    Profil użytkownika używany do kalibracji tau (regeneracji) i ogólnych parametrów.
+
+    experience_level:
+      - "beginner": początkujący, wolniejsza regeneracja (tau × 1.2)
+      - "intermediate": średniozaawansowany (tau × 1.0, default)
+      - "advanced": zaawansowany, szybsza regeneracja (tau × 0.85)
+
+    age_years: wiek użytkownika (opcjonalnie)
+      - <25: tau × 0.90 (szybsza regen)
+      - 25-40: tau × 1.00 (baseline)
+      - 40-55: tau × 1.15
+      - >55: tau × 1.30
+
+    recovery_factor (0.5-2.0): bezpośredni mnożnik tau (jeśli user wie swoje)
+      - <1: szybsza regeneracja (lepszy sen, dieta, genetyka)
+      - >1: wolniejsza regeneracja (stres, zły sen)
+
+    Effective tau scaling: experience × age × recovery_factor
+    """
+    experience_level: str = "intermediate"
+    age_years: Optional[int] = None
+    recovery_factor: float = 1.0
+    bodyweight_kg: Optional[float] = None
+
+    def get_tau_scale(self) -> float:
+        """Oblicz scaling factor dla tau na podstawie profilu"""
+        scale = 1.0
+
+        # Experience
+        exp_scales = {
+            "beginner": 1.20,
+            "intermediate": 1.00,
+            "advanced": 0.85,
+        }
+        scale *= exp_scales.get(self.experience_level, 1.0)
+
+        # Age
+        if self.age_years is not None:
+            if self.age_years < 25:
+                scale *= 0.90
+            elif self.age_years < 40:
+                scale *= 1.00
+            elif self.age_years < 55:
+                scale *= 1.15
+            else:
+                scale *= 1.30
+
+        # Direct recovery factor
+        scale *= max(0.5, min(2.0, self.recovery_factor))
+
+        return scale
+
+
+@dataclass
 class PlannerConfig:
     """
     Konfiguracja planner
@@ -118,39 +174,55 @@ class PlannerConfig:
         - min_capacity: najniższa akceptowalna capacity PO treningu (chroni przed over-fatigue)
         - max_capacity: najwyższa akceptowalna capacity PO treningu (wymusza wystarczający bodziec)
 
-    Przykład dla quads: [0.60, 0.85]
-        - Jeśli MPC_after < 0.60 → OVERFATIGUE (zbyt wyczerpany, ryzyko kontuzji)
-        - Jeśli MPC_after > 0.85 → UNDERFATIGUE (nie było wystarczająco pracy)
-        - Sweet spot: 0.60-0.85
+    volume_limit_per_muscle: dict[muscle_id, float]
+        - Max volume_load (Σ weight × reps × engagement) per muscle per session
+        - Chroni przed over-volume, nawet jeśli target zone nie osiągnięta
+        - Default (DEFAULT_VOLUME_LIMITS) jeśli None
     """
     target_capacity_zones: Dict[str, List[float]]
     default_reps_by_type: Dict[str, int]
     default_time_per_rep_sec: float = 2.5
     rest_between_sets_sec: int = 120
-    target_rir: int = 2                                     # Planowanie do RIR=2 (moderate effort)
+    target_rir: int = 2
     volume_limit_per_muscle: Optional[Dict[str, float]] = None
-    exercise_catalog: Optional[Dict[str, Dict]] = None      # metadata (type, czas, itd.)
+    exercise_catalog: Optional[Dict[str, Dict]] = None
+
+    # Beam search / exploration
+    # 0.0 = pure greedy (deterministic, zawsze top-1)
+    # >0 = softmax sampling z top-K (większa różnorodność planów)
+    exploration_temperature: float = 0.0
+    beam_width: int = 3                                     # Top-K kandydatów do rozważenia
+
+    # User profile (per-user tau calibration)
+    user_profile: Optional[UserProfile] = None
 
     # Ile serii przypada na jedno ĆWICZENIE (każda seria = osobny PlannedSet w planie)
     sets_per_exercise_by_type: Dict[str, int] = field(default_factory=lambda: {
-        "compound": 3,              # 3 serie compound (typowe)
+        "compound": 3,
         "compound_variation": 3,
-        "isolation": 3,             # 3 serie isolation
-        "core": 2,                  # 2 serie core (krócej)
+        "isolation": 3,
+        "core": 2,
     })
 
     def get_sets_count(self, ex_type: str) -> int:
         """Ile serii powinno być dla ćwiczenia tego typu"""
         return self.sets_per_exercise_by_type.get(ex_type, 3)
 
+    def get_volume_limit(self, muscle_id: str) -> float:
+        """Volume limit (weight × reps × engagement) per muscle per session"""
+        if self.volume_limit_per_muscle:
+            return self.volume_limit_per_muscle.get(muscle_id, DEFAULT_VOLUME_LIMITS.get(muscle_id, 3000.0))
+        return DEFAULT_VOLUME_LIMITS.get(muscle_id, 3000.0)
+
+    def get_tau_scale(self) -> float:
+        """Pobierz tau scaling z user profile (1.0 = baseline)"""
+        if self.user_profile:
+            return self.user_profile.get_tau_scale()
+        return 1.0
+
     def get_target_zone(self, muscle_id: str) -> List[float]:
         """Target capacity zone dla mięśnia (fallback to safe default)"""
         return self.target_capacity_zones.get(muscle_id, [0.55, 0.85])
-
-    def get_volume_limit(self, muscle_id: str) -> float:
-        if self.volume_limit_per_muscle:
-            return self.volume_limit_per_muscle.get(muscle_id, 5000.0)
-        return 5000.0
 
 
 # ============================================================================
@@ -187,4 +259,40 @@ DEFAULT_DEFAULT_REPS_BY_TYPE = {
     "compound_variation": 8,  # Variations - hypertrophy (8 reps)
     "isolation": 12,          # Isolation - higher reps (12 reps)
     "core": 10,
+}
+
+
+# ============================================================================
+# Default volume limits per muscle per session
+# Volume load = Σ(weight_kg × reps × engagement_ratio) sumowane po wszystkich seriach
+#
+# Approximate session targets (training volume research, Schoenfeld et al.):
+# - Duże mięśnie (chest, quads, lats): ~12-20 hard sets tygodniowo → ~2500-4500 kg/session
+# - Średnie (delts, triceps, biceps): ~10-16 sets tygodniowo → ~1500-2500 kg/session
+# - Małe (calves, adductors): ~8-14 sets → ~800-1500 kg/session
+# - Core: ~1000-2000 kg/session
+#
+# Limits poniżej są konserwatywne dla sesji (single training, nie weekly).
+# ============================================================================
+DEFAULT_VOLUME_LIMITS = {
+    # Duże mięśnie - wysoki limit
+    "chest":          4000.0,
+    "quads":          5000.0,
+    "hamstrings":     4000.0,
+    "glutes":         4500.0,
+    "lats":           3500.0,
+    "erectors":       4000.0,
+
+    # Średnie
+    "anterior_delts": 2000.0,
+    "lateral_delts":  1500.0,
+    "rear_delts":     1500.0,
+    "rhomboids":      2500.0,
+    "triceps":        2000.0,
+    "biceps":         1800.0,
+
+    # Małe
+    "calves":         1200.0,
+    "adductors":      1500.0,
+    "abs":            1500.0,
 }
