@@ -1,300 +1,315 @@
 """
-Przykłady praktycznego użycia WorkoutPlanner
+Praktyczne przykłady użycia WorkoutPlanner z integracją DeepGain.
+
+WAŻNE: MPC = Muscle Performance Capacity w [0.1, 1.0]
+    - 1.0 = fresh (fully recovered)
+    - 0.1 = exhausted
 
 Uruchom:
     python3 example_usage.py
 """
 
-import json
+import logging
 from datetime import datetime, timedelta
+
+from data_structures import (
+    WorkoutSet, PlannerConfig,
+    DEFAULT_TARGET_CAPACITY_ZONES, DEFAULT_DEFAULT_REPS_BY_TYPE,
+)
 from planner import WorkoutPlanner
-from data_structures import PlannerConfig, WorkoutSet
+import models_wrapper
+
+logging.basicConfig(level=logging.WARNING)  # Mniej logów w przykładach
 
 
-def load_planner():
-    """Helper: wczytaj planner z config"""
-    with open('exercises_config.json', 'r') as f:
-        exercises_config = json.load(f)
+def setup_planner():
+    """Stwórz planer z domyślną konfiguracją."""
+    # Próbuje załadować real model, fallback na mock
+    models_wrapper.initialize_model()
 
-    planner_config = PlannerConfig(
-        target_fatigue_zones=exercises_config['target_fatigue_zones'],
-        default_reps_by_type=exercises_config['default_reps_by_type'],
+    config = PlannerConfig(
+        target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+        default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+        target_rir=2,
     )
-
-    return WorkoutPlanner(exercises_config, planner_config), exercises_config, planner_config
+    return WorkoutPlanner(config)
 
 
 # ============================================================================
-# EXAMPLE 1: Nowy użytkownik - plan "push day" (klatka, ramiona)
+# EXAMPLE 1: Fresh user — pełny upper body
 # ============================================================================
-def example1_push_day():
-    """
-    Scenariusz: Nowy użytkownik chce zrobić push day (bench press + shoulders).
-    Wszystkie mięśnie świeże (MPC=0).
-    """
+def example1_fresh_upper():
     print("\n" + "="*70)
-    print("EXAMPLE 1: Push Day (Fresh User)")
+    print("EXAMPLE 1: Fresh User — Upper Body Workout")
     print("="*70)
 
-    planner, _, config = load_planner()
+    planner = setup_planner()
 
-    # Świeży stan
-    state = {m: 0.0 for m in config.target_fatigue_zones.keys()}
+    # Fresh state — wszystkie mięśnie na 1.0 (capacity)
+    fresh_state = {m: 1.0 for m in planner.all_muscles}
 
-    # Zaplanuj: 1 compound (bench), 2 isolation (accessories)
+    # Wyłącz nogi (chcemy upper body)
+    leg_exercises = ["squat", "low_bar_squat", "high_bar_squat", "deadlift",
+                     "sumo_deadlift", "bulgarian_split_squat", "leg_press",
+                     "romanian_deadlift", "leg_curl", "leg_extension"]
+
     result = planner.plan(
-        state=state,
-        n_compound=1,
-        n_isolation=2,
-        available_time_sec=2400,  # 40 minut
-    )
-
-    print(f"\n📋 PLAN:")
-    for s in result.plan:
-        print(f"  {s.order}. {s.exercise_id}")
-        print(f"      └─ {s.reps}x{s.weight_kg}kg | ~{s.estimated_time_sec}s")
-        print(f"      └─ Muscles: {', '.join(s.primary_muscles[:2])}")
-
-    print(f"\n⏱️  Total time: {result.total_time_estimated_sec / 60:.1f} min")
-
-    print(f"\n📊 Predicted MPC after workout:")
-    chest_muscles = ['chest_upper', 'chest_lower', 'shoulder_front', 'shoulder_side']
-    for muscle in chest_muscles:
-        if muscle in result.predicted_mpc_after:
-            mpc = result.predicted_mpc_after[muscle]
-            target = config.target_fatigue_zones[muscle]
-            status = "✓" if target[0] <= mpc <= target[1] else "⚠"
-            print(f"  {status} {muscle}: {mpc:.2f} (target: [{target[0]}, {target[1]}])")
-
-    print(f"\n✅ Validation:")
-    for note in result.notes:
-        if muscle in note or "chest" in note or "shoulder" in note:
-            print(f"  {note}")
-
-
-# ============================================================================
-# EXAMPLE 2: Powrót po dwudniowej przerwie - zmęczone nogi
-# ============================================================================
-def example2_upper_day_after_leg():
-    """
-    Scenariusz: User miał leg day 2 dni temu, teraz chce robić upper body.
-    Nogi są jeszcze zmęczone, powinniśmy robić upper.
-    """
-    print("\n" + "="*70)
-    print("EXAMPLE 2: Upper Day After Leg Day (2 days ago)")
-    print("="*70)
-
-    planner, _, config = load_planner()
-
-    # Stan: nogi zmęczone, reszta świeża
-    state = {m: 0.0 for m in config.target_fatigue_zones.keys()}
-    state['quadriceps'] = 0.35
-    state['hamstring'] = 0.30
-    state['glutes'] = 0.35
-    state['erector_spinae'] = 0.20
-
-    print(f"\n📊 Starting state (after leg day 2 days ago):")
-    for muscle in ['quadriceps', 'hamstring', 'glutes', 'erector_spinae']:
-        print(f"  {muscle}: {state[muscle]:.2f}")
-
-    # Zaplanuj: upper body (no legs)
-    result = planner.plan(
-        state=state,
+        state=fresh_state,
         n_compound=2,
         n_isolation=3,
         available_time_sec=3600,
+        exclusions=leg_exercises,
     )
 
-    print(f"\n📋 Suggested plan:")
+    print(f"\n📋 PLAN ({len(result.plan)} serii, {result.total_time_estimated_sec/60:.1f} min):")
+    current_exercise = None
     for s in result.plan:
-        muscles = s.primary_muscles[:2]
-        print(f"  {s.order}. {s.exercise_id} ({', '.join(muscles)})")
+        if s.exercise_id != current_exercise:
+            print(f"\n  🏋️  {s.exercise_id.upper()}  ({', '.join(s.primary_muscles)})")
+            current_exercise = s.exercise_id
+        rir_str = f"RIR~{s.predicted_rir:.1f}" if s.predicted_rir else ""
+        print(f"     Seria {s.order}: {s.reps}×{s.weight_kg}kg  {rir_str}")
 
-    # Sprawdź czy planner uniknął nóg
-    legs = ['quadriceps', 'hamstring', 'glutes', 'calves']
-    plan_muscles = []
-    for s in result.plan:
-        plan_muscles.extend(s.primary_muscles)
-
-    legs_in_plan = [m for m in legs if m in plan_muscles]
-
-    if legs_in_plan:
-        print(f"\n⚠️  WARNING: Planner included leg muscles: {legs_in_plan}")
-        print("  (Możesz je wyłączyć za pomocą exclusions)")
-    else:
-        print(f"\n✓ Good: Plan focuses on upper body, spares legs")
+    print(f"\n📊 MPC (capacity) after — zaangażowane mięśnie:")
+    for m in sorted(result.predicted_mpc_after.keys()):
+        mpc = result.predicted_mpc_after[m]
+        if mpc < 0.99:  # Zaangażowane
+            target = planner.config.get_target_zone(m)
+            status = "✓" if target[0] <= mpc <= target[1] else "⚠"
+            print(f"   {status} {m}: {mpc:.2f}  (target: [{target[0]}, {target[1]}])")
 
 
 # ============================================================================
-# EXAMPLE 3: Replanning - user odrzuca ćwiczenie w trakcie treningu
+# EXAMPLE 2: Po leg day — oszczędza nogi
 # ============================================================================
-def example3_replanning_midworkout():
-    """
-    Scenariusz: User ma plan 4 serii.
-    Wykonał 2, ale nie czuje się dobrze - chce zmienić trzecią serię.
-    """
-    print("\n" + "="*70)
-    print("EXAMPLE 3: Replanning - User Rejects Exercise Mid-Workout")
+def example2_post_leg_day():
+    print("\n\n" + "="*70)
+    print("EXAMPLE 2: Po Leg Day (16h temu) — System Oszczędza Nogi")
     print("="*70)
 
-    planner, _, config = load_planner()
+    planner = setup_planner()
 
-    state = {m: 0.0 for m in config.target_fatigue_zones.keys()}
+    # Symuluj leg day 16h temu
+    now = datetime.now()
+    yesterday = now - timedelta(hours=16)
+    leg_history = [
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=yesterday),
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=yesterday + timedelta(minutes=3)),
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=yesterday + timedelta(minutes=6)),
+        WorkoutSet('leg_curl', 40.0, 10, rir=2, timestamp=yesterday + timedelta(minutes=25)),
+        WorkoutSet('leg_curl', 40.0, 10, rir=1, timestamp=yesterday + timedelta(minutes=28)),
+        WorkoutSet('leg_extension', 50.0, 12, rir=2, timestamp=yesterday + timedelta(minutes=40)),
+    ]
 
-    # Zaplanuj oryginalny trening
+    # Pobierz MPC (capacity) teraz
+    current_mpc = models_wrapper.predict_mpc(
+        [ws.to_model_dict() for ws in leg_history],
+        now
+    )
+
+    print(f"\n📊 Obecne MPC (po 16h odpoczynku):")
+    for m in ['quads', 'hamstrings', 'glutes', 'chest', 'lats', 'biceps']:
+        print(f"   {m}: {current_mpc[m]:.2f}  {'← zmęczone' if current_mpc[m] < 0.85 else ''}")
+
+    # Zaplanuj — planer sam powinien unikać nóg
+    result = planner.plan(
+        state=current_mpc,
+        n_compound=2,
+        n_isolation=2,
+        available_time_sec=3600,
+        user_history=leg_history,
+        now=now,
+    )
+
+    print(f"\n📋 PLAN:")
+    current_exercise = None
+    for s in result.plan:
+        if s.exercise_id != current_exercise:
+            print(f"   {s.exercise_id} (×{sum(1 for x in result.plan if x.exercise_id == s.exercise_id)} sets, "
+                  f"muscles: {', '.join(s.primary_muscles[:2])})")
+            current_exercise = s.exercise_id
+
+
+# ============================================================================
+# EXAMPLE 3: Replanning — user odrzuca ćwiczenie
+# ============================================================================
+def example3_replanning():
+    print("\n\n" + "="*70)
+    print("EXAMPLE 3: Replanning — User Odrzuca Ćwiczenie w Trakcie")
+    print("="*70)
+
+    planner = setup_planner()
+    fresh_state = {m: 1.0 for m in planner.all_muscles}
+
+    # Oryginalny plan
     original = planner.plan(
-        state=state,
+        state=fresh_state,
         n_compound=2,
         n_isolation=2,
         available_time_sec=3600,
     )
 
-    print(f"\n📋 Original plan:")
+    print(f"\n📋 Oryginalny plan:")
+    unique_ex = []
     for s in original.plan:
-        print(f"  {s.order}. {s.exercise_id}")
+        if s.exercise_id not in unique_ex:
+            unique_ex.append(s.exercise_id)
+    for i, ex in enumerate(unique_ex):
+        print(f"   {i+1}. {ex}")
 
-    # Symuluj: user wykonał pierwsze 2 serie
-    print(f"\n⏳ User completed sets 1-2, starts set 3...")
-    print(f"   Set 3 is: {original.plan[2].exercise_id}")
-    print(f"   → User says: 'I don't feel like this one, give me something else'")
+    # Załóżmy: user zrobił pierwsze 3 serie (pierwsze ćwiczenie), ale odrzuca drugie
+    first_exercise = unique_ex[0]
+    completed = [s for s in original.plan if s.exercise_id == first_exercise]
 
-    completed = original.plan[:2]
+    rejected_exercise = unique_ex[1] if len(unique_ex) > 1 else None
+    print(f"\n⏳ User zrobił: {first_exercise} ({len(completed)} sets)")
+    print(f"❌ User odrzuca: {rejected_exercise}")
 
-    # Przeplanuj: został 0 compound, 1 isolation (bo już 2 razy robił isolation)
+    # Replan: brakuje 1 compound (bo 1 już zrobił), 2 isolation
     replanned = planner.replan(
         session_so_far=completed,
-        remaining_n_compound=0,
-        remaining_n_isolation=1,
-        current_state=state,
-        available_time_sec=1200,
+        remaining_n_compound=1,
+        remaining_n_isolation=2,
+        available_time_sec=3600,
+        exclusions=[rejected_exercise] if rejected_exercise else [],
     )
 
-    print(f"\n✅ Replanned workout:")
+    print(f"\n✅ Nowy plan:")
+    seen = set()
     for s in replanned.plan:
-        if s.order <= 2:
-            print(f"  {s.order}. {s.exercise_id} (completed)")
-        else:
-            print(f"  {s.order}. {s.exercise_id} (NEW)")
-
-    print(f"\n💡 Changed: Set 3 from '{original.plan[2].exercise_id}' → '{replanned.plan[2].exercise_id}'")
+        if s.exercise_id not in seen:
+            seen.add(s.exercise_id)
+            count = sum(1 for x in replanned.plan if x.exercise_id == s.exercise_id)
+            status = "✓ done" if s.exercise_id == first_exercise else "+ new"
+            print(f"   {status}: {s.exercise_id} (×{count} sets)")
 
 
 # ============================================================================
-# EXAMPLE 4: Krótka sesja (30 min) - time-constrained planning
+# EXAMPLE 4: Short session (30 min)
 # ============================================================================
-def example4_quick_session():
-    """
-    Scenariusz: User ma tylko 30 minut na trening w pracy.
-    Chce coś szybko, ale efektywnie.
-    """
-    print("\n" + "="*70)
-    print("EXAMPLE 4: Quick Session (30 min) - Time Constrained")
+def example4_short_session():
+    print("\n\n" + "="*70)
+    print("EXAMPLE 4: 30-Minutowy Trening")
     print("="*70)
 
-    planner, _, config = load_planner()
+    planner = setup_planner()
+    fresh_state = {m: 1.0 for m in planner.all_muscles}
 
-    state = {m: 0.0 for m in config.target_fatigue_zones.keys()}
-
-    # Zaplanuj maksymalnie w 30 minut
     result = planner.plan(
-        state=state,
-        n_compound=2,   # ambitne, ale zobaczymy co się zmieści
+        state=fresh_state,
+        n_compound=1,
         n_isolation=2,
-        available_time_sec=30 * 60,  # 30 min
+        available_time_sec=1800,  # 30 min
     )
 
-    print(f"\n📋 30-Minute Workout Plan:")
-    total = 0
+    print(f"\n📋 Plan w 30 min:")
+    print(f"   Całkowity czas: {result.total_time_estimated_sec/60:.1f} min")
+    print(f"   Ilość serii: {len(result.plan)}")
+
+    unique = {}
     for s in result.plan:
-        print(f"  {s.order}. {s.exercise_id}")
-        print(f"      └─ Time: {s.estimated_time_sec}s + rest")
-        total += s.estimated_time_sec
-
-    print(f"\n⏱️  Total execution time: ~{total / 60:.1f} min (realistic: ~{(total + 90*len(result.plan)) / 60:.1f} with rest)")
-
-    if total + 90 * len(result.plan) <= 30 * 60:
-        print(f"✓ Fits in 30 minutes!")
-    else:
-        print(f"⚠️  Might be tight, need to reduce rest time or skip core")
+        unique.setdefault(s.exercise_id, []).append(s)
+    for ex, sets in unique.items():
+        first = sets[0]
+        print(f"   - {ex}: {len(sets)}×{first.reps} @ {first.weight_kg}kg")
 
 
 # ============================================================================
-# EXAMPLE 5: Z historią użytkownika - smart 1RM estimation
+# EXAMPLE 5: Historia użytkownika + estymacja 1RM
 # ============================================================================
-def example5_with_user_history():
-    """
-    Scenariusz: User trenuje ostatni miesiąc.
-    Planner estymuje 1RM z historii i dostosowuje weights.
-    """
-    print("\n" + "="*70)
-    print("EXAMPLE 5: Planning with User Training History")
+def example5_with_history():
+    print("\n\n" + "="*70)
+    print("EXAMPLE 5: Z Historią Użytkownika — Auto 1RM Estimation")
     print("="*70)
 
-    planner, _, config = load_planner()
+    planner = setup_planner()
 
-    # Symuluj historię: treningi z ostatniego miesiąca
     now = datetime.now()
     user_history = [
-        # Tydzień 1
-        WorkoutSet('back_squat', 60.0, 10, rir=3, timestamp=now - timedelta(days=28)),
-        WorkoutSet('back_squat', 65.0, 10, rir=2, timestamp=now - timedelta(days=28)),
-        WorkoutSet('bench_press', 50.0, 10, rir=3, timestamp=now - timedelta(days=27)),
-        
-        # Tydzień 2
-        WorkoutSet('back_squat', 70.0, 8, rir=2, timestamp=now - timedelta(days=21)),
-        WorkoutSet('back_squat', 70.0, 8, rir=2, timestamp=now - timedelta(days=21)),
-        
-        # Tydzień 3
-        WorkoutSet('back_squat', 75.0, 6, rir=2, timestamp=now - timedelta(days=14)),
-        WorkoutSet('bench_press', 55.0, 8, rir=2, timestamp=now - timedelta(days=14)),
-        
-        # Tydzień 4
-        WorkoutSet('back_squat', 80.0, 5, rir=2, timestamp=now - timedelta(days=7)),
-        WorkoutSet('bench_press', 60.0, 8, rir=1, timestamp=now - timedelta(days=7)),
+        # Ostatnie 3 tygodnie progresji benchu
+        WorkoutSet('bench_press', 70.0, 8, rir=2, timestamp=now - timedelta(days=21)),
+        WorkoutSet('bench_press', 75.0, 6, rir=2, timestamp=now - timedelta(days=14)),
+        WorkoutSet('bench_press', 80.0, 5, rir=1, timestamp=now - timedelta(days=7)),
+        # Squat
+        WorkoutSet('squat', 90.0, 8, rir=3, timestamp=now - timedelta(days=20)),
+        WorkoutSet('squat', 100.0, 5, rir=1, timestamp=now - timedelta(days=6)),
+        # Deadlift
+        WorkoutSet('deadlift', 120.0, 5, rir=2, timestamp=now - timedelta(days=12)),
     ]
 
-    print(f"\n📚 User training history (last month):")
-    for s in user_history:
-        print(f"  {s.exercise_id}: {s.weight_kg}kg × {s.reps} (RIR={s.rir})")
-
-    # Estymuj 1RM
     estimated_1rm = planner.estimate_1rm_from_history(user_history)
-    print(f"\n💪 Estimated 1RM:")
-    for ex_id in ['back_squat', 'bench_press']:
+    print(f"\n💪 Estimated 1RM (Brzycki formula z RIR correction):")
+    for ex_id in ['bench_press', 'squat', 'deadlift']:
         if ex_id in estimated_1rm:
-            print(f"  {ex_id}: {estimated_1rm[ex_id]:.1f}kg")
+            print(f"   {ex_id}: {estimated_1rm[ex_id]:.1f} kg")
 
-    # Zaplanuj nowy trening
-    state = {m: 0.0 for m in config.target_fatigue_zones.keys()}
+    # Planer użyje 75% 1RM jako default weight
     result = planner.plan(
-        state=state,
-        n_compound=1,
-        n_isolation=1,
-        available_time_sec=1800,
-        user_history=user_history,  # Pass history for smart planning
+        n_compound=2,
+        n_isolation=2,
+        available_time_sec=3600,
+        user_history=user_history,
+        now=now,
     )
 
-    print(f"\n📋 Today's plan (based on estimated 1RM):")
+    print(f"\n📋 Dzisiejszy plan (weights = 75% estimated 1RM):")
+    seen = set()
     for s in result.plan:
-        print(f"  {s.order}. {s.exercise_id}: {s.reps}x{s.weight_kg}kg")
-        ex_1rm = estimated_1rm.get(s.exercise_id, 100)
-        percentage = (s.weight_kg / ex_1rm) * 100
-        print(f"      └─ {percentage:.0f}% of estimated 1RM")
+        if s.exercise_id in seen:
+            continue
+        seen.add(s.exercise_id)
+        count = sum(1 for x in result.plan if x.exercise_id == s.exercise_id)
+        one_rm = estimated_1rm.get(s.exercise_id, 0)
+        pct = (s.weight_kg / one_rm * 100) if one_rm > 0 else 0
+        print(f"   - {s.exercise_id}: {count}×{s.reps} @ {s.weight_kg}kg ({pct:.0f}% 1RM)")
+
+
+# ============================================================================
+# EXAMPLE 6: Sprawdzenie czy używamy real model
+# ============================================================================
+def example6_model_status():
+    print("\n\n" + "="*70)
+    print("EXAMPLE 6: Status Modelu")
+    print("="*70)
+
+    planner = setup_planner()
+
+    print(f"\n🤖 Model status:")
+    if models_wrapper.is_using_real_model():
+        print(f"   ✓ Używam prawdziwego DeepGain (Michała)")
+    else:
+        print(f"   ⚠ Używam Mock model (fallback)")
+        print(f"      Powód: brak torch lub brak deepgain_model_muscle_ord.pt")
+        print(f"      Aby użyć prawdziwego modelu:")
+        print(f"        1. pip install torch numpy pandas pyyaml")
+        print(f"        2. Umieść deepgain_model_muscle_ord.pt w tym katalogu")
+        print(f"        3. Umieść exercise_muscle_order.yaml")
+        print(f"        4. Umieść exercise_muscle_weights_scaled.csv")
+
+    print(f"\n📏 Model dostarcza:")
+    print(f"   - {len(planner.all_muscles)} mięśni")
+    print(f"   - {len(planner.all_exercises)} ćwiczeń (w catalogu planer widzi {len(planner.exercise_catalog)})")
+
+    print(f"\n🎯 Target capacity zones (przykład):")
+    for muscle in ['quads', 'chest', 'biceps', 'abs']:
+        zone = planner.config.get_target_zone(muscle)
+        print(f"   {muscle}: [{zone[0]}, {zone[1]}]  # MPC po treningu (capacity)")
 
 
 # ============================================================================
 # MAIN
 # ============================================================================
 if __name__ == '__main__':
-    print("\n\n🏋️  WorkoutPlanner - Praktyczne Przykłady\n")
+    print("\n\n🏋️  WorkoutPlanner v2 — Przykłady Użycia (DeepGain Integration)\n")
 
-    example1_push_day()
-    example2_upper_day_after_leg()
-    example3_replanning_midworkout()
-    example4_quick_session()
-    example5_with_user_history()
+    example6_model_status()
+    example1_fresh_upper()
+    example2_post_leg_day()
+    example3_replanning()
+    example4_short_session()
+    example5_with_history()
 
     print("\n\n" + "="*70)
-    print("✅ All examples completed!")
+    print("✅ Wszystkie przykłady zakończone!")
     print("="*70)
-    print("\nFor more details, see README.md or PLANNER_REPORT.md\n")
+    print("\nWięcej informacji: README.md lub PLANNER_REPORT.md\n")

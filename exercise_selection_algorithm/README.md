@@ -1,51 +1,270 @@
-# Exercise Selection Algorithm — Milosz
+# WorkoutPlanner — Silnik Rekomendacyjny Treningów
 
-## O co chodzi
+**Z integracją DeepGain (Michał)** — pełny silnik planujący trening siłowy z optymalizacją zmęczenia mięśni.
 
-Silnik rekomendacyjny dla treningu. Używa modelu DeepGain (z `models/`) jako **black-box** do predykcji MPC i symulacji skutków serii. Na podstawie aktualnego stanu mięśni użytkownika i preferencji czasowych dobiera listę ćwiczeń, która:
+## ⚡ Kluczowe Informacje
 
-- wykorzysta dostępną "energię" mięśni (wysoki MPC = priorytet),
-- doprowadzi zaangażowane mięśnie do zakresu **target fatigue zone** (wystarczający bodziec, nie przetrenowanie),
-- respektuje podział na ćwiczenia czasochłonne vs mniej czasochłonne zadany przez usera,
-- **replanuje w locie** kiedy user odrzuci ćwiczenie lub zmodyfikuje serie/powtórzenia.
+### MPC Semantyka (WAŻNE!)
 
-## Interfejs
+```
+MPC = Muscle Performance Capacity w [0.1, 1.0]
+  - 1.0 = fresh (fully recovered)
+  - 0.1 = exhausted
+```
 
-**Input:**
-- `state: dict[muscle_id, MPC]` — aktualny MPC per mięsień (z `inference.predict_mpc(history, now)`)
-- `n_compound: int` — ile ćwiczeń czasochłonnych (A. Główne + B. Wariacje)
-- `n_isolation: int` — ile mniej czasochłonnych (C. Akcesoria, izolacje)
-- `exclusions: list[exercise_id]` — co user nie chce / nie może
-- `preferences: dict` — opcjonalne: ulubione ćwiczenia, historia unikania
+**Fresh user → MPC = 1.0 dla wszystkich mięśni.** Po treningu MPC spada, z czasem regeneruje się w górę.
 
-**Output:**
-- `plan: list[PlannedSet]` z `(exercise_id, weight_kg, reps, rir, order)`
-- `predicted_mpc_after: dict[muscle_id, MPC]` — prognoza stanu po sesji
+### Architektura
 
-**Replanning:**
-- `replan(session_so_far, remaining_n_compound, remaining_n_isolation, new_state) -> plan`
+```
+┌─────────────────────────────────────────────────┐
+│  planner.py (WorkoutPlanner)                    │
+│    plan() / replan() / estimate_1rm()           │
+│                    ↓                             │
+│  models_wrapper.py                               │
+│    - Try: inference.py (Michał's DeepGain)      │
+│    - Fallback: MockModelHandle (heurystyka)     │
+│                    ↓                             │
+│  Model API:                                      │
+│    predict_mpc(history, ts) → capacity          │
+│    predict_rir(state, ex, w, r) → RIR           │
+│    get_exercises() / get_muscles()              │
+└─────────────────────────────────────────────────┘
+```
 
-## Taski
+## 🚀 Szybki Start
 
-1. **Target fatigue zone** — przedział MPC per mięsień po sesji (np. [0.2, 0.5]). Konsultować z Aleksandrem (τ z literatury, mięśnie wolno regenerujące → mniej agresywny target).
-2. **Funkcja celu** — suma `involvement_rank_score × MPC_before` (priorytet świeżych mięśni zaangażowanych wysoko w rankingu ćwiczenia) minus penalty za mięśnie wypadające poza target zone.
-3. **Greedy / beam search** — w każdym kroku symuluj kandydatów (wywołanie `predict_mpc` po dodaniu kandydata), wybierz ten maksymalizujący cel. Compound przed isolation. Core na końcu.
-4. **Replanning on-the-fly** — po każdej wykonanej/odrzuconej/zmodyfikowanej serii aktualizuj state, przeplanuj pozostałe sloty.
-5. **Guardrails** — (a) bez powtórzeń tego samego ćwiczenia, (b) volume limits per mięsień, (c) core/stabilizacja na końcu, (d) kolejność typowa dla siłowni (duże grupy przed małymi w ramach compound).
-6. **Testy symulacyjne** — syntetyczni userzy (różne MPC startowe, różne historie), uruchomić planowanie, zweryfikować: czy każde ćwiczenie z Milestone 1 może się pojawić w jakimś scenariuszu, czy po wykonaniu planu MPC trafia w target zone.
+### Wymagania
+```bash
+# Minimalne (mock model):
+# Tylko Python 3.8+ (standard library)
 
-## Deliverables
+# Dla real DeepGain:
+pip install torch numpy pandas pyyaml
+```
 
-- `planner.py` — klasa `WorkoutPlanner` z `plan()` i `replan()`
-- `planner_tests.py` — testy symulacyjne
-- `planner_report.md` — wykresy MPC przed/po sesji, przykładowe plany dla różnych profili
+### Uruchomienie
+```bash
+# Testy
+python3 planner_tests.py
 
-## Współpraca z `models/` (Michal)
+# Przykłady
+python3 example_usage.py
+```
 
-- **Stabilne API inference od początku** — nawet jeśli model jest słaby, kontrakt wywołań nie może się zmieniać. Milosz może stubować modelem zastępczym (np. prosta heurystyka drop = f(reps, rir)) żeby nie być zablokowanym, ale integracja z prawdziwym modelem musi być bezbolesna.
-- Po każdym re-treningu Michala — Milosz przepina model, robi sanity run plannera, raportuje anomalie (np. "po nowym modelu planner ciągle wybiera leg curl" → może τ dla hamstrings zbyt długie).
+## 📦 Pliki
 
-## Współpraca z `dataset/` (Aleksander)
+| Plik | Opis |
+|------|------|
+| `planner.py` | **`WorkoutPlanner`** — plan() i replan() |
+| `models_wrapper.py` | Adapter DeepGain + mock fallback |
+| `inference.py` | **DeepGain API Michała** (stable contract) |
+| `data_structures.py` | `WorkoutSet`, `PlannedSet`, `PlanResult`, `PlannerConfig` |
+| `planner_tests.py` | 8 scenariuszy testowych |
+| `example_usage.py` | 6 praktycznych przykładów |
 
-- Target fatigue zones i volume limits — konsultacja z literaturą którą Aleksander zbiera.
-- Lista ćwiczeń, ich `id`, nazwy i18n, podział compound/isolation — używać z `exercise_muscle_order.yaml`. Nie duplikować, nie trzymać własnej kopii.
+## 💡 Użycie API
+
+### Podstawowe planowanie
+
+```python
+from planner import WorkoutPlanner
+from data_structures import (
+    PlannerConfig,
+    DEFAULT_TARGET_CAPACITY_ZONES,
+    DEFAULT_DEFAULT_REPS_BY_TYPE,
+)
+import models_wrapper
+
+# 1. Załaduj model (real → fallback mock)
+models_wrapper.initialize_model()  # próbuje załadować deepgain_model_muscle_ord.pt
+
+# 2. Stwórz planera
+config = PlannerConfig(
+    target_capacity_zones=DEFAULT_TARGET_CAPACITY_ZONES,
+    default_reps_by_type=DEFAULT_DEFAULT_REPS_BY_TYPE,
+    target_rir=2,  # Planuj pod RIR=2 (moderate)
+)
+planner = WorkoutPlanner(config)
+
+# 3. Fresh state (pierwszy trening)
+state = {m: 1.0 for m in planner.all_muscles}
+
+# 4. Zaplanuj
+result = planner.plan(
+    state=state,
+    n_compound=2,            # 2 ćwiczenia compound (× 3 serie każde)
+    n_isolation=3,           # 3 ćwiczenia isolation (× 3 serie)
+    available_time_sec=3600, # 1 godzina
+)
+
+# 5. Wyniki
+for s in result.plan:
+    print(f"{s.order}. {s.exercise_id}: {s.reps}×{s.weight_kg}kg "
+          f"(predicted RIR: {s.predicted_rir:.1f})")
+
+print(f"MPC after: {result.predicted_mpc_after}")
+print(f"Total time: {result.total_time_estimated_sec/60:.1f} min")
+print(f"Used real model: {result.used_real_model}")
+```
+
+### Replanning (zmiana w locie)
+
+```python
+# User wykonał pierwsze 3 serie (pierwsze ćwiczenie), odrzuca następne
+completed = result.plan[:3]
+
+replanned = planner.replan(
+    session_so_far=completed,
+    remaining_n_compound=1,
+    remaining_n_isolation=3,
+    available_time_sec=3000,
+    exclusions=["sumo_deadlift"],  # To co odrzucił
+)
+```
+
+### Z historią użytkownika
+
+```python
+from data_structures import WorkoutSet
+from datetime import datetime, timedelta
+
+user_history = [
+    WorkoutSet('bench_press', 80.0, 5, rir=1,
+               timestamp=datetime.now() - timedelta(days=7)),
+    WorkoutSet('squat', 100.0, 5, rir=1,
+               timestamp=datetime.now() - timedelta(days=5)),
+]
+
+# Planer sam obliczy state z historii
+result = planner.plan(
+    n_compound=2,
+    n_isolation=2,
+    available_time_sec=3600,
+    user_history=user_history,  # ← auto-oblicza MPC i estymuje 1RM
+)
+```
+
+### Exclusions i Preferences
+
+```python
+result = planner.plan(
+    state=state,
+    n_compound=2,
+    n_isolation=3,
+    available_time_sec=3600,
+    exclusions=["deadlift", "sumo_deadlift"],  # Kontuzja lędźwi
+    preferences={
+        "favorites": ["incline_bench"],  # +0.2 score bonus
+        "avoid": ["dips"],               # -0.5 score penalty
+    },
+)
+```
+
+## 🎯 Target Capacity Zones
+
+```python
+# Default (w data_structures.DEFAULT_TARGET_CAPACITY_ZONES)
+{
+    "quads":       [0.60, 0.85],  # Duże — bardziej konserwatywnie
+    "hamstrings":  [0.60, 0.85],
+    "chest":       [0.55, 0.85],  # Średnie
+    "biceps":      [0.45, 0.80],  # Małe — można agresywniej
+    "triceps":     [0.45, 0.80],
+    "abs":         [0.50, 0.85],  # Core
+    # ... wszystkie 15 mięśni
+}
+```
+
+**Interpretacja:**
+- MPC_after < `min` → **OVERFATIGUE** (niebezpieczne, duża kara w score)
+- MPC_after > `max` → **UNDERFATIGUE** (mało bodźca, mniejsza kara)
+- `min` ≤ MPC_after ≤ `max` → **SWEET SPOT** ✓
+
+## 🔬 Integracja z DeepGain Michała
+
+### Bezbolesna integracja
+
+Planer używa `models_wrapper` jako adapter:
+
+1. **Jeśli masz pliki Michała:**
+   - `inference.py`
+   - `deepgain_model_muscle_ord.pt`
+   - `exercise_muscle_order.yaml`
+   - `exercise_muscle_weights_scaled.csv`
+   - `torch` + `pandas` + `pyyaml`
+
+   → Wrapper **automatycznie** używa real DeepGain.
+
+2. **Jeśli nie masz:** → wrapper fallback na MockModelHandle (heurystyka).
+
+### Sprawdzenie który model używasz
+
+```python
+import models_wrapper
+
+models_wrapper.initialize_model()
+print(models_wrapper.is_using_real_model())
+# True = DeepGain, False = Mock
+```
+
+### Forcing mock model (np. do testów)
+
+```python
+models_wrapper.initialize_model(force_mock=True)
+```
+
+## 📊 Testy
+
+```bash
+python3 planner_tests.py
+```
+
+8 scenariuszy:
+
+| # | Test | Co sprawdza |
+|---|------|-------------|
+| 1 | Fresh User | Podstawowy workflow — upper + lower |
+| 2 | Fatigued User | System oszczędza zmęczone mięśnie |
+| 3 | Replanning | Zmiana planu w locie |
+| 4 | Time Constraint | Respektowanie limitu czasu |
+| 5 | Exercise Variety | Różnorodność w 10 scenariuszach |
+| 6 | With User History | Auto-estymacja 1RM |
+| 7 | Target Zones | Weryfikacja zakresów |
+| 8 | Exclusions & Preferences | Filtry i preferencje |
+
+## 🔄 Co się zmieniło (vs wcześniejsza wersja)
+
+### ❗ MPC Semantyka ODWRÓCONA
+
+| Stare | Nowe |
+|-------|------|
+| MPC = zmęczenie | MPC = capacity |
+| 0.0 = fresh, 1.0 = zmęczone | **1.0 = fresh, 0.1 = exhausted** |
+| fatigue zone [0.15, 0.40] | capacity zone [0.60, 0.85] |
+
+### 🧠 Inne zmiany
+
+- **15 mięśni** (nie 19) — zgodnie z DeepGain
+- **34 ćwiczenia** z canonical names (`bench_press`, `squat`, `ohp`, ...)
+- **PlannedSet = jedna seria** — `n_compound=2` znaczy 2 ĆWICZENIA (każde z `sets_per_exercise_by_type` serii, default 3)
+- **predict_rir zintegrowane** — planer dobiera reps pod target RIR=2
+- **to_model_dict()** — konwersja WorkoutSet → format dict Michała
+
+## 🛠️ TODO / Future Work
+
+- [ ] Hamulec na over-preferencję deadliftu (dominuje bo angażuje 7 mięśni)
+- [ ] Beam search zamiast greedy (większa różnorodność)
+- [ ] Volume limits per muscle (weight × reps)
+- [ ] Per-user tau calibration (gdy user dostarczy dane)
+- [ ] Periodyzacja (intensywność ↑↓ tygodniowo)
+
+## 📝 Stable Contract
+
+Interfejs `plan()` / `replan()` jest stabilny. Zmiany modelu (DeepGain) są niewidoczne dla klientów — wrapper zapewnia kompatybilność.
+
+## 👤 Współpraca
+
+- **Michał** (`models/`): `inference.py` + `.pt` checkpoint
+- **Aleksander** (`dataset/`): tau per mięsień, target zones z literatury, volume limits
+- **Miłosz** (planner): `WorkoutPlanner` (ten kod)
