@@ -69,16 +69,16 @@ exercises:
     name_pl: "Przysiad ze sztanga"
     category: compound
     primary_muscles: [quads, erectors]
-    secondary_muscles: [glutes]
-    tertiary_muscles: [hamstrings]
+    secondary_muscles: [hamstrings]
+    tertiary_muscles: [glutes]
 
   low_bar_squat:
     csv_title: "Low Bar Przysiad (Squat)"
     name_en: "Low Bar Squat"
     name_pl: "Przysiad low bar"
     category: compound
-    primary_muscles: [adductors, erectors]
-    secondary_muscles: [calves]
+    primary_muscles: [adductors, calves]
+    secondary_muscles: [erectors]
     tertiary_muscles: [glutes]
 
   high_bar_squat:
@@ -95,7 +95,7 @@ exercises:
     name_en: "Deadlift"
     name_pl: "Martwy ciag"
     category: compound
-    primary_muscles: [erectors, glutes, hamstrings]
+    primary_muscles: [hamstrings, erectors, glutes]
     secondary_muscles: [quads]
     tertiary_muscles: []
 
@@ -104,9 +104,9 @@ exercises:
     name_en: "Sumo Deadlift"
     name_pl: "Martwy ciag sumo"
     category: compound
-    primary_muscles: [abs, quads]
-    secondary_muscles: [glutes, calves, erectors]
-    tertiary_muscles: [hamstrings, adductors]
+    primary_muscles: [quads, abs]
+    secondary_muscles: [calves, hamstrings, glutes]
+    tertiary_muscles: [adductors, erectors]
 
   rdl:
     csv_title: "Romanian Deadlift (RDL)"
@@ -114,7 +114,7 @@ exercises:
     name_pl: "Martwy ciag rumunski"
     category: compound
     primary_muscles: [hamstrings]
-    secondary_muscles: [glutes, erectors]   # fizjologicznie wymagane; CSV (Schoenfeld 2015) mierzy tylko biceps femoris
+    secondary_muscles: []
     tertiary_muscles: []
 
   bench_press:
@@ -124,7 +124,7 @@ exercises:
     category: compound
     primary_muscles: [chest]
     secondary_muscles: [triceps, anterior_delts]
-    tertiary_muscles: [lateral_delts, rear_delts]
+    tertiary_muscles: [lateral_delts]
 
   close_grip_bench:
     csv_title: "Close Grip Bench Press"
@@ -140,9 +140,9 @@ exercises:
     name_en: "Spoto Press"
     name_pl: "Spoto press"
     category: compound
-    primary_muscles: [chest, triceps]
-    secondary_muscles: [anterior_delts]
-    tertiary_muscles: []
+    primary_muscles: [chest]          # UROM proxy: chest strongest (Fischer 2025, Table 2)
+    secondary_muscles: [triceps]      # triceps second
+    tertiary_muscles: [anterior_delts] # anterior delts third
 
   incline_bench:
     csv_title: "Incline Bench Press"
@@ -167,7 +167,7 @@ exercises:
     name_en: "Decline Bench Press"
     name_pl: "Wyciskanie na skosie ujemnym"
     category: compound
-    primary_muscles: [triceps, chest]   # triceps=102%, chest=89% (Lauver 2015)
+    primary_muscles: [chest, triceps]
     secondary_muscles: [anterior_delts]   # ant_delts=58%
     tertiary_muscles: []
 
@@ -187,7 +187,7 @@ exercises:
     category: compound
     primary_muscles: [chest, triceps]   # chest=85%, triceps=80% (Bagchi 2015 / McKenzie 2022)
     secondary_muscles: [anterior_delts]   # ant_delts=65%
-    tertiary_muscles: [lateral_delts, abs]   # lateral_delts=25%, abs=25%
+    tertiary_muscles: [abs, lateral_delts]
 
   ohp:
     csv_title: "Overhead Press (OHP)"
@@ -205,7 +205,7 @@ exercises:
     category: isolation
     primary_muscles: [chest]
     secondary_muscles: [anterior_delts]
-    tertiary_muscles: [lateral_delts, rear_delts]
+    tertiary_muscles: [lateral_delts]
 
   skull_crusher:
     csv_title: "Wyciskanie Francuskie"
@@ -257,8 +257,8 @@ exercises:
     name_en: "Pendlay Row / Barbell Row"
     name_pl: "Wioslowanie sztanga Pendlay"
     category: compound
-    primary_muscles: [rear_delts, erectors]
-    secondary_muscles: [rhomboids, lats]
+    primary_muscles: [rear_delts, rhomboids]
+    secondary_muscles: [erectors, lats]
     tertiary_muscles: []
 
   pull_up:
@@ -266,9 +266,9 @@ exercises:
     name_en: "Pull-ups"
     name_pl: "Podciaganie"
     category: compound
-    primary_muscles: [rear_delts, lats]
-    secondary_muscles: [rhomboids, biceps]
-    tertiary_muscles: []
+    primary_muscles: [lats]          # Youdas 2010: 117–130% MVIC — dominujace
+    secondary_muscles: [biceps]      # Youdas 2010: 78–96% MVIC
+    tertiary_muscles: [rhomboids]    # Dickie 2016: middle trap 60.1% MVIC (pronated peak)
 
   lat_pulldown:
     csv_title: "Lat Pulldown"
