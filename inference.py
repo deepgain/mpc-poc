@@ -28,6 +28,8 @@ import torch
 import torch.nn as nn
 import warnings
 
+from strength_priors import ANCHOR_NAMES, build_anchor_ratio_matrix, coerce_anchor_values, resolve_anchor_values
+
 warnings.filterwarnings("ignore")
 
 # ─── Device ─────────────────────────────────────────────────────────────────
@@ -44,6 +46,8 @@ WEIGHT_SCALE = 200.0
 REPS_SCALE   = 30.0
 RIR_SCALE    = 5.0
 DT_SCALE     = np.log1p(168.0)
+NUM_STRENGTH_ANCHORS = len(ANCHOR_NAMES)
+FULL_STRENGTH_FEATURE_DIM = NUM_STRENGTH_ANCHORS + 3
 
 # ─── Muscles (15 groups — matches train.py exactly) ─────────────────────────
 ALL_MUSCLES = [
@@ -124,39 +128,53 @@ for _ex, _ms in EXERCISE_MUSCLES.items():
 # ─── Model Architecture (mirrors train.py exactly) ──────────────────────────
 
 class FatigueNet(nn.Module):
-    def __init__(self, embed_dim, hidden_dim):
+    def __init__(self, embed_dim, hidden_dim, strength_feature_dim):
         super().__init__()
+        self.strength_feature_dim = strength_feature_dim
         self.net = nn.Sequential(
-            nn.Linear(4 + 2 * embed_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(4 + strength_feature_dim + 2 * embed_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(),
             nn.Linear(hidden_dim // 2, 1), nn.Sigmoid(),
         )
 
-    def forward(self, weight, reps, rir, mpc, e_embed, m_embed):
-        x = torch.cat([
+    def forward(self, weight, reps, rir, mpc, e_embed, m_embed, strength_feat=None):
+        pieces = [
             weight.unsqueeze(-1), reps.unsqueeze(-1),
             rir.unsqueeze(-1), mpc.unsqueeze(-1),
-            e_embed, m_embed,
-        ], dim=-1)
+        ]
+        if self.strength_feature_dim > 0:
+            if strength_feat is None:
+                shape = weight.shape + (self.strength_feature_dim,)
+                strength_feat = torch.zeros(shape, dtype=weight.dtype, device=weight.device)
+            pieces.append(strength_feat)
+        pieces.extend([e_embed, m_embed])
+        x = torch.cat(pieces, dim=-1)
         return self.net(x).squeeze(-1)
 
 
 class RIRNet(nn.Module):
-    def __init__(self, embed_dim, hidden_dim, num_muscles):
+    def __init__(self, embed_dim, hidden_dim, num_muscles, strength_feature_dim):
         super().__init__()
+        self.strength_feature_dim = strength_feature_dim
         self.net = nn.Sequential(
-            nn.Linear(2 + embed_dim + num_muscles, hidden_dim), nn.ReLU(),
+            nn.Linear(2 + strength_feature_dim + embed_dim + num_muscles, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
 
-    def forward(self, weight, reps, e_embed, mpc_all):
-        x = torch.cat([
+    def forward(self, weight, reps, e_embed, mpc_all, strength_feat=None):
+        pieces = [
             weight.unsqueeze(-1), reps.unsqueeze(-1),
-            e_embed, mpc_all,
-        ], dim=-1)
+        ]
+        if self.strength_feature_dim > 0:
+            if strength_feat is None:
+                shape = weight.shape + (self.strength_feature_dim,)
+                strength_feat = torch.zeros(shape, dtype=weight.dtype, device=weight.device)
+            pieces.append(strength_feat)
+        pieces.extend([e_embed, mpc_all])
+        x = torch.cat(pieces, dim=-1)
         return torch.sigmoid(self.net(x).squeeze(-1))
 
 
@@ -193,18 +211,74 @@ class ExponentialRecovery(nn.Module):
 
 
 class DeepGainModel(nn.Module):
-    def __init__(self, num_exercises, num_muscles, embed_dim, hidden_dim):
+    def __init__(self, num_exercises, num_muscles, embed_dim, hidden_dim, strength_feature_dim=0):
         super().__init__()
         self.num_muscles    = num_muscles
+        self.strength_feature_dim = strength_feature_dim
         self.exercise_embed = nn.Embedding(num_exercises, embed_dim)
         self.muscle_embed   = nn.Embedding(num_muscles, embed_dim)
-        self.f_net = FatigueNet(embed_dim, hidden_dim)
-        self.g_net = RIRNet(embed_dim, hidden_dim, num_muscles)
+        self.f_net = FatigueNet(embed_dim, hidden_dim, strength_feature_dim)
+        self.g_net = RIRNet(embed_dim, hidden_dim, num_muscles, strength_feature_dim)
         self.r     = ExponentialRecovery(num_muscles)
         self.register_buffer(
             "involvement",
             torch.tensor(INVOLVEMENT_MATRIX, dtype=torch.float32),
         )
+        ratio_matrix, availability = build_anchor_ratio_matrix(ALL_EXERCISES)
+        self.register_buffer(
+            "anchor_ratio_matrix",
+            torch.tensor(ratio_matrix, dtype=torch.float32),
+            persistent=False,
+        )
+        self.register_buffer(
+            "projection_available",
+            torch.tensor(availability, dtype=torch.float32),
+            persistent=False,
+        )
+        self.register_buffer(
+            "default_strength_anchors",
+            torch.tensor(
+                coerce_anchor_values(None) / WEIGHT_SCALE,
+                dtype=torch.float32,
+            ),
+        )
+
+    def _broadcast_anchors(self, anchors, weight):
+        if anchors is None:
+            anchors = self.default_strength_anchors
+        if anchors.dim() == weight.dim() + 1:
+            return anchors.to(device=weight.device, dtype=weight.dtype)
+        view_shape = (1,) * weight.dim() + (NUM_STRENGTH_ANCHORS,)
+        return anchors.to(device=weight.device, dtype=weight.dtype).view(view_shape).expand(weight.shape + (NUM_STRENGTH_ANCHORS,))
+
+    def compute_strength_features(self, exercise_idx, weight, anchors=None):
+        if self.strength_feature_dim <= 0:
+            return None
+        anchors = self._broadcast_anchors(anchors, weight)
+        ratios = self.anchor_ratio_matrix[exercise_idx]
+        projected = (anchors * ratios).sum(dim=-1)
+        available = self.projection_available[exercise_idx].to(dtype=weight.dtype)
+        relative_load = torch.where(projected > 1e-6, weight / projected.clamp_min(1e-6), torch.zeros_like(weight))
+        features = torch.cat(
+            [
+                anchors,
+                projected.unsqueeze(-1),
+                relative_load.unsqueeze(-1),
+                available.unsqueeze(-1),
+            ],
+            dim=-1,
+        )
+        return features[..., :self.strength_feature_dim]
+
+    def predict_rir_norm(self, exercise_idx, weight, reps, mpc_all, anchors=None):
+        e_embed = self.exercise_embed(exercise_idx)
+        strength_feat = self.compute_strength_features(exercise_idx, weight, anchors)
+        return self.g_net(weight, reps, e_embed, mpc_all, strength_feat)
+
+    def predict_drop_norm(self, exercise_idx, weight, reps, rir, mpc, muscle_embed, anchors=None):
+        e_embed = self.exercise_embed(exercise_idx)
+        strength_feat = self.compute_strength_features(exercise_idx, weight, anchors)
+        return self.f_net(weight, reps, rir, mpc, e_embed, muscle_embed, strength_feat)
 
 
 # ─── Public API ─────────────────────────────────────────────────────────────
@@ -225,18 +299,18 @@ def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
     state = ckpt.get("model_state_dict", ckpt)
     embed_dim  = state["exercise_embed.weight"].shape[1]
     hidden_dim = state["f_net.net.0.weight"].shape[0]
-    model = DeepGainModel(NUM_EXERCISES, NUM_MUSCLES, embed_dim, hidden_dim)
-    model.load_state_dict(state)
+    g_in_dim = state["g_net.net.0.weight"].shape[1]
+    strength_feature_dim = max(0, g_in_dim - (2 + embed_dim + NUM_MUSCLES))
+    model = DeepGainModel(
+        NUM_EXERCISES,
+        NUM_MUSCLES,
+        embed_dim,
+        hidden_dim,
+        strength_feature_dim=strength_feature_dim,
+    )
+    model.load_state_dict(state, strict=False)
     model = model.to(device)
     model.eval()
-    # Attach per-exercise weight normalization ranges (saved since M5).
-    # Falls back to global WEIGHT_SCALE for older checkpoints.
-    if "weight_p5" in ckpt and "weight_p95" in ckpt:
-        model.weight_p5  = np.asarray(ckpt["weight_p5"],  dtype=np.float32)
-        model.weight_p95 = np.asarray(ckpt["weight_p95"], dtype=np.float32)
-    else:
-        model.weight_p5  = None
-        model.weight_p95 = None
     return model
 
 
@@ -244,6 +318,7 @@ def predict_mpc(
     model: DeepGainModel,
     user_history: list[dict],
     timestamp: str | datetime,
+    strength_anchors=None,
 ) -> dict[str, float]:
     """Estimate Muscle Performance Capacity for all muscles at a given moment.
 
@@ -259,6 +334,11 @@ def predict_mpc(
             - "reps"       : int   — reps performed
             - "rir"        : int   — reps in reserve actually logged (0-5)
             - "timestamp"  : str or datetime — when the set was performed
+          History entries may also include config_1rm_* onboarding values.
+        strength_anchors: Optional onboarding anchors. Accepts either:
+            - {"bench_press": ..., "squat": ..., "deadlift": ...}
+            - {"config_1rm_bench_press": ..., ...}
+            - [bench, squat, deadlift]
           Sets with unknown exercises are silently skipped.
           Sets after `timestamp` are excluded.
         timestamp: The moment for which to estimate MPC.
@@ -274,6 +354,12 @@ def predict_mpc(
     """
     device    = next(model.parameters()).device
     ts_query  = _parse_timestamp(timestamp)
+    anchors_kg = resolve_anchor_values(
+        anchor_values=strength_anchors,
+        records=user_history,
+        defaults=(model.default_strength_anchors.detach().cpu().numpy() * WEIGHT_SCALE),
+    )
+    anchors_t = torch.tensor(anchors_kg / WEIGHT_SCALE, dtype=torch.float32, device=device)
 
     # Filter to known exercises at or before the query timestamp, sort by time
     valid = []
@@ -286,7 +372,7 @@ def predict_mpc(
             continue
         valid.append({
             "exercise_idx": EXERCISE_TO_IDX[ex],
-            "weight":    _normalize_weight(model, float(entry["weight_kg"]), EXERCISE_TO_IDX[ex]),
+            "weight":    float(entry["weight_kg"]) / WEIGHT_SCALE,
             "reps":      float(entry["reps"]) / REPS_SCALE,
             "rir":       float(entry["rir"])  / RIR_SCALE,
             "timestamp": ts,
@@ -318,17 +404,22 @@ def predict_mpc(
 
             # Fatigue from this set
             ei    = torch.tensor([s["exercise_idx"]], dtype=torch.long, device=device)
-            e_emb = model.exercise_embed(ei)                                   # (1, E)
             inv   = model.involvement[ei]                                      # (1, M)
-
-            e_emb_exp = e_emb.unsqueeze(1).expand(-1, M, -1).reshape(-1, E)   # (M, E)
             w_exp     = torch.full((M,), s["weight"], dtype=torch.float32, device=device)
             r_exp     = torch.full((M,), s["reps"],   dtype=torch.float32, device=device)
             rir_exp   = torch.full((M,), s["rir"],    dtype=torch.float32, device=device)
             mpc_flat  = mpc.reshape(-1)                                        # (M,)
             m_emb_flat = all_m_embed.reshape(-1, E)                            # (M, E)
 
-            drop = model.f_net(w_exp, r_exp, rir_exp, mpc_flat, e_emb_exp, m_emb_flat)
+            drop = model.predict_drop_norm(
+                ei.expand(M),
+                w_exp,
+                r_exp,
+                rir_exp,
+                mpc_flat,
+                m_emb_flat,
+                anchors_t,
+            )
             mpc  = (mpc * (1.0 - inv * drop.reshape(1, M))).clamp(min=0.1)
 
             prev_ts = s["timestamp"]
@@ -352,6 +443,7 @@ def predict_rir(
     exercise: str,
     weight: float,
     reps: int,
+    strength_anchors=None,
 ) -> float:
     """Predict RIR for a planned set given the current muscle state.
 
@@ -372,7 +464,7 @@ def predict_rir(
 
     Example:
         mpc = predict_mpc(model, history, now)
-        rir = predict_rir(model, mpc, "bench_press", 100.0, 5)
+        rir = predict_rir(model, mpc, "bench_press", 100.0, 5, strength_anchors={"bench_press": 120})
         # 1.8
     """
     if exercise not in EXERCISE_TO_IDX:
@@ -384,16 +476,20 @@ def predict_rir(
     device  = next(model.parameters()).device
     mpc_vals = [state.get(m, 1.0) for m in ALL_MUSCLES]
     mpc_t    = torch.tensor([mpc_vals], dtype=torch.float32, device=device)
+    anchors_kg = resolve_anchor_values(
+        anchor_values=strength_anchors if strength_anchors is not None else state,
+        defaults=(model.default_strength_anchors.detach().cpu().numpy() * WEIGHT_SCALE),
+    )
+    anchors_t = torch.tensor(anchors_kg / WEIGHT_SCALE, dtype=torch.float32, device=device)
     w_t      = torch.tensor(
-        [_normalize_weight(model, weight, EXERCISE_TO_IDX[exercise])],
+        [weight / WEIGHT_SCALE],
         dtype=torch.float32, device=device,
     )
     r_t  = torch.tensor([reps / REPS_SCALE], dtype=torch.float32, device=device)
     ei   = torch.tensor([EXERCISE_TO_IDX[exercise]], dtype=torch.long, device=device)
-    e_emb = model.exercise_embed(ei)
 
     with torch.no_grad():
-        rir_norm = model.g_net(w_t, r_t, e_emb, mpc_t)
+        rir_norm = model.predict_rir_norm(ei, w_t, r_t, mpc_t, anchors_t)
 
     return float(np.clip(float(rir_norm.item()) * RIR_SCALE, 0.0, 5.0))
 
@@ -409,14 +505,6 @@ def get_exercises() -> list[str]:
     """Return all exercise IDs recognized by the current model."""
     return sorted(ALL_EXERCISES)
 
-
-def _normalize_weight(model: "DeepGainModel", weight_kg: float, exercise_idx: int) -> float:
-    """Normalize weight using per-exercise p5/p95 if available, else global scale."""
-    if model.weight_p5 is not None:
-        p5  = float(model.weight_p5[exercise_idx])
-        p95 = float(model.weight_p95[exercise_idx])
-        return float(np.clip((weight_kg - p5) / max(p95 - p5, 1.0), 0.0, 1.0))
-    return weight_kg / WEIGHT_SCALE
 
 
 def _parse_timestamp(ts) -> datetime:
