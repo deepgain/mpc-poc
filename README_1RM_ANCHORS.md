@@ -4,6 +4,10 @@
 
 Ta gałąź naprawia lukę w modelu, który wcześniej nie rozróżniał dwóch użytkowników o różnym poziomie siły dla tego samego seta.
 
+Osobny opis kontraktu integracyjnego dla `inference.py`:
+
+- [README_INFERENCE.md](/Users/michal/Documents/WB2/mpc-poc/README_INFERENCE.md)
+
 Wariant końcowy rozdziela dwa sygnały:
 
 - `MPC` = bieżące zmęczenie / świeżość
