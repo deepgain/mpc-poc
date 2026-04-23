@@ -21,10 +21,11 @@ warnings.filterwarnings("ignore")
 from strength_priors import (
     ANCHOR_COLUMNS,
     ANCHOR_NAMES,
+    build_anchor_history_from_completed_sets,
     build_anchor_ratio_matrix,
     coerce_anchor_values,
+    DEFAULT_SESSION_GAP_HOURS,
     default_anchor_array_kg,
-    update_strength_anchors,
 )
 
 if torch.cuda.is_available():
@@ -266,22 +267,23 @@ print(
 def build_user_sequences(user_df):
     sequences = []
     for uid, grp in user_df.groupby("user_id"):
-        current_anchors_kg = coerce_anchor_values(grp.iloc[0].to_dict(), defaults=DEFAULT_STRENGTH_ANCHORS_KG)
-        anchor_history = []
-        for row in grp.itertuples(index=False):
-            anchor_history.append((current_anchors_kg / WEIGHT_SCALE).astype(np.float32).copy())
-            current_anchors_kg = update_strength_anchors(
-                current_anchors_kg,
-                [
-                    {
-                        "exercise": row.exercise,
-                        "weight_kg": float(row.weight_kg),
-                        "reps": int(row.reps),
-                        "rir": float(row.rir),
-                        "timestamp": row.timestamp,
-                    }
-                ],
-            )
+        initial_anchors_kg = coerce_anchor_values(grp.iloc[0].to_dict(), defaults=DEFAULT_STRENGTH_ANCHORS_KG)
+        completed_sets = [
+            {
+                "exercise": row.exercise,
+                "weight_kg": float(row.weight_kg),
+                "reps": int(row.reps),
+                "rir": float(row.rir),
+                "timestamp": row.timestamp,
+            }
+            for row in grp.itertuples(index=False)
+        ]
+        anchor_history_kg, _ = build_anchor_history_from_completed_sets(
+            initial_anchors_kg,
+            completed_sets,
+            session_gap_hours=DEFAULT_SESSION_GAP_HOURS,
+            apply_trailing_session=True,
+        )
         seq = {
             "user_id": uid,
             "exercise_idx": torch.tensor(grp["exercise_idx"].values, dtype=torch.long),
@@ -291,7 +293,7 @@ def build_user_sequences(user_df):
             "delta_t": torch.tensor(
                 np.log1p(grp["delta_t_hours"].values) / DT_SCALE, dtype=torch.float32
             ),
-            "anchors": torch.tensor(np.stack(anchor_history, axis=0), dtype=torch.float32),
+            "anchors": torch.tensor(anchor_history_kg / WEIGHT_SCALE, dtype=torch.float32),
             "timestamps": grp["timestamp"].values,
         }
         sequences.append(seq)
@@ -1584,13 +1586,13 @@ with torch.no_grad():
 
         timestamps = seq["timestamps"][:T_plot]
         rir_actual = seq["rir"][:T_plot].cpu().numpy() * RIR_SCALE
-        rir_dyn = rir_dyn.squeeze(0).detach().cpu().numpy() * RIR_SCALE
-        rir_static = rir_static.squeeze(0).detach().cpu().numpy() * RIR_SCALE
+        rir_dyn = np.asarray(rir_dyn, dtype=np.float32).reshape(-1) * RIR_SCALE
+        rir_static = np.asarray(rir_static, dtype=np.float32).reshape(-1) * RIR_SCALE
         x = np.arange(T_plot, dtype=np.int32)
 
         ts_series = pd.Series(timestamps)
         session_gap_hours = ts_series.diff().dt.total_seconds().div(3600.0).fillna(0.0)
-        session_starts = np.flatnonzero(session_gap_hours.to_numpy() > 6.0)
+        session_starts = np.flatnonzero(session_gap_hours.to_numpy() > DEFAULT_SESSION_GAP_HOURS)
 
         dyn_mae = float(np.mean(np.abs(rir_dyn - rir_actual)))
         static_mae = float(np.mean(np.abs(rir_static - rir_actual)))

@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from inference import EXERCISE_TO_IDX, RIR_SCALE, load_model
+from strength_priors import DEFAULT_SESSION_GAP_HOURS
 from validate_1rm_dynamics import build_anchor_histories, sequential_predict
 
 
@@ -18,7 +19,6 @@ DEFAULT_CHECKPOINT = "deepgain_model_best.pt"
 DEFAULT_DATA_PATH = "training_data.csv"
 DEFAULT_OUTPUT_PATH = os.path.join("charts", "chart_dynamic_vs_static_rir.png")
 PINNED_USER_IDS = {"user_00030", "user_00111"}
-SESSION_GAP_HOURS = 6.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,7 +58,7 @@ def select_sample_users(holdout_df: pd.DataFrame) -> list[str]:
     return chosen
 
 
-def compute_session_starts(timestamps: pd.Series, gap_hours: float = SESSION_GAP_HOURS) -> np.ndarray:
+def compute_session_starts(timestamps: pd.Series, gap_hours: float = DEFAULT_SESSION_GAP_HOURS) -> np.ndarray:
     deltas_h = timestamps.diff().dt.total_seconds().div(3600.0).fillna(0.0)
     starts = np.flatnonzero(deltas_h.to_numpy() > gap_hours)
     return starts.astype(int)
@@ -80,7 +80,7 @@ def main() -> int:
 
     for ax, user_id in zip(axes, sample_user_ids):
         grp = holdout_df[holdout_df["user_id"] == user_id].sort_values("timestamp").reset_index(drop=True)
-        dynamic_history, static_history = build_anchor_histories(grp)
+        dynamic_history, static_history, _, _ = build_anchor_histories(grp)
         rir_dyn = sequential_predict(model, grp, dynamic_history)
         rir_static = sequential_predict(model, grp, static_history)
         rir_actual = grp["rir"].to_numpy(dtype=np.float32)

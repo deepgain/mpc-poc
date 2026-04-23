@@ -17,7 +17,11 @@ from inference import (
     WEIGHT_SCALE,
     load_model,
 )
-from strength_priors import ANCHOR_NAMES, resolve_anchor_values, update_strength_anchors
+from strength_priors import (
+    ANCHOR_NAMES,
+    build_anchor_history_from_completed_sets,
+    resolve_anchor_values,
+)
 
 
 DEFAULT_CHECKPOINT = "deepgain_model_best.pt"
@@ -80,20 +84,21 @@ def row_to_completed_set(row) -> dict:
     }
 
 
-def build_anchor_histories(user_df: pd.DataFrame, override_initial_anchors=None) -> tuple[np.ndarray, np.ndarray]:
+def build_anchor_histories(
+    user_df: pd.DataFrame,
+    override_initial_anchors=None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     initial_anchors = resolve_anchor_values(
         anchor_values=override_initial_anchors if override_initial_anchors is not None else user_df.iloc[0].to_dict()
     )
-    current_anchors = initial_anchors.copy()
-    dynamic_history = []
-    static_history = []
-
-    for row in user_df.itertuples(index=False):
-        dynamic_history.append(current_anchors.copy())
-        static_history.append(initial_anchors.copy())
-        current_anchors = update_strength_anchors(current_anchors, [row_to_completed_set(row)])
-
-    return np.stack(dynamic_history, axis=0), np.stack(static_history, axis=0)
+    completed_sets = [row_to_completed_set(row) for row in user_df.itertuples(index=False)]
+    dynamic_history, final_dynamic_anchors = build_anchor_history_from_completed_sets(
+        initial_anchors,
+        completed_sets,
+        apply_trailing_session=True,
+    )
+    static_history = np.repeat(initial_anchors[None, :], len(completed_sets), axis=0).astype(np.float32, copy=False)
+    return dynamic_history, static_history, final_dynamic_anchors, initial_anchors.copy()
 
 
 def sequential_predict(model, user_df: pd.DataFrame, anchor_history_kg: np.ndarray) -> np.ndarray:
@@ -162,13 +167,23 @@ def build_shuffled_anchor_map(eval_df: pd.DataFrame) -> dict[str, np.ndarray]:
     return shuffled
 
 
-def summarize_anchor_dynamics(dynamic_histories: list[np.ndarray], static_histories: list[np.ndarray]) -> dict[str, float]:
+def summarize_anchor_dynamics(
+    dynamic_histories: list[np.ndarray],
+    static_histories: list[np.ndarray],
+    final_dynamic_anchors: list[np.ndarray],
+    initial_anchor_states: list[np.ndarray],
+) -> dict[str, float]:
     changed_users = 0
     total_sets = 0
     changed_sets = 0
     final_relative_changes = {anchor: [] for anchor in ANCHOR_NAMES}
 
-    for dynamic_history, static_history in zip(dynamic_histories, static_histories):
+    for dynamic_history, static_history, final_dynamic, initial in zip(
+        dynamic_histories,
+        static_histories,
+        final_dynamic_anchors,
+        initial_anchor_states,
+    ):
         diff = np.abs(dynamic_history - static_history)
         user_changed = bool(np.any(diff > 1e-9))
         changed_users += int(user_changed)
@@ -176,11 +191,9 @@ def summarize_anchor_dynamics(dynamic_histories: list[np.ndarray], static_histor
         changed_sets += int(changed_set_mask.sum())
         total_sets += dynamic_history.shape[0]
 
-        initial = static_history[0]
-        final = dynamic_history[-1]
         for idx, anchor in enumerate(ANCHOR_NAMES):
             denom = max(float(initial[idx]), 1e-6)
-            final_relative_changes[anchor].append(float((final[idx] - initial[idx]) / denom))
+            final_relative_changes[anchor].append(float((final_dynamic[idx] - initial[idx]) / denom))
 
     return {
         "changed_user_fraction": changed_users / max(len(dynamic_histories), 1),
@@ -214,13 +227,17 @@ def main() -> int:
     targets = []
     dynamic_histories = []
     static_histories = []
+    final_dynamic_anchors = []
+    initial_anchor_states = []
 
     for user_id, grp in eval_df.groupby("user_id"):
-        dynamic_history, static_history = build_anchor_histories(grp)
-        shuffled_dynamic_history, _ = build_anchor_histories(grp, override_initial_anchors=shuffle_map[user_id])
+        dynamic_history, static_history, final_dynamic, initial_anchors = build_anchor_histories(grp)
+        shuffled_dynamic_history, _, _, _ = build_anchor_histories(grp, override_initial_anchors=shuffle_map[user_id])
 
         dynamic_histories.append(dynamic_history)
         static_histories.append(static_history)
+        final_dynamic_anchors.append(final_dynamic)
+        initial_anchor_states.append(initial_anchors)
 
         preds_dynamic.append(sequential_predict(model, grp, dynamic_history))
         preds_static.append(sequential_predict(model, grp, static_history))
@@ -235,7 +252,12 @@ def main() -> int:
     dynamic_metrics = compute_metrics(preds_dynamic, targets)
     static_metrics = compute_metrics(preds_static, targets)
     shuffled_metrics = compute_metrics(preds_shuffled, targets)
-    anchor_stats = summarize_anchor_dynamics(dynamic_histories, static_histories)
+    anchor_stats = summarize_anchor_dynamics(
+        dynamic_histories,
+        static_histories,
+        final_dynamic_anchors,
+        initial_anchor_states,
+    )
 
     print("== Holdout Metrics ==")
     print(

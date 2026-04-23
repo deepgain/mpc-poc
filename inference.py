@@ -30,6 +30,7 @@ import warnings
 
 from strength_priors import (
     ANCHOR_NAMES,
+    build_anchor_history_from_completed_sets,
     build_anchor_ratio_matrix,
     DEFAULT_UPDATE_ALPHA,
     DEFAULT_UPDATE_MAX_RELATIVE_CHANGE,
@@ -376,7 +377,6 @@ def predict_mpc(
         records=user_history,
         defaults=(model.default_strength_anchors.detach().cpu().numpy() * WEIGHT_SCALE),
     )
-    anchors_t = torch.tensor(anchors_kg / WEIGHT_SCALE, dtype=torch.float32, device=device)
 
     # Filter to known exercises at or before the query timestamp, sort by time
     valid = []
@@ -388,6 +388,10 @@ def predict_mpc(
         if ex not in EXERCISE_TO_IDX:
             continue
         valid.append({
+            "exercise":  ex,
+            "weight_kg": float(entry["weight_kg"]),
+            "reps_raw":  int(entry["reps"]),
+            "rir_raw":   float(entry["rir"]),
             "exercise_idx": EXERCISE_TO_IDX[ex],
             "weight":    float(entry["weight_kg"]) / WEIGHT_SCALE,
             "reps":      float(entry["reps"]) / REPS_SCALE,
@@ -399,6 +403,20 @@ def predict_mpc(
         return {m: 1.0 for m in ALL_MUSCLES}
 
     valid.sort(key=lambda x: x["timestamp"])
+    anchor_history_kg, _ = build_anchor_history_from_completed_sets(
+        anchors_kg,
+        [
+            {
+                "exercise": s["exercise"],
+                "weight_kg": s["weight_kg"],
+                "reps": s["reps_raw"],
+                "rir": s["rir_raw"],
+                "timestamp": s["timestamp"],
+            }
+            for s in valid
+        ],
+        apply_trailing_session=True,
+    )
 
     M            = model.num_muscles
     all_m_idx    = torch.arange(M, device=device)
@@ -409,7 +427,7 @@ def predict_mpc(
         mpc      = torch.ones(1, M, device=device)     # (1, M)
         prev_ts  = valid[0]["timestamp"]
 
-        for i, s in enumerate(valid):
+        for i, (s, anchors_step_kg) in enumerate(zip(valid, anchor_history_kg)):
             # Recovery since previous set
             if i > 0:
                 dt_h = (s["timestamp"] - prev_ts).total_seconds() / 3600.0
@@ -420,6 +438,7 @@ def predict_mpc(
                     mpc = model.r(mpc.reshape(-1), dt_norm, all_m_idx).reshape(1, M)
 
             # Fatigue from this set
+            anchors_t = torch.tensor([anchors_step_kg / WEIGHT_SCALE], dtype=torch.float32, device=device)
             ei    = torch.tensor([s["exercise_idx"]], dtype=torch.long, device=device)
             inv   = model.involvement[ei]                                      # (1, M)
             w_exp     = torch.full((M,), s["weight"], dtype=torch.float32, device=device)

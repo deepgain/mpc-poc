@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 
 import numpy as np
 
@@ -29,6 +30,7 @@ DEFAULT_UPDATE_MIN_RELATIVE_LOAD = 0.50
 DEFAULT_UPDATE_MAX_REPS = 10
 DEFAULT_UPDATE_MAX_RIR = 3
 DEFAULT_UPDATE_TOP_K = 3
+DEFAULT_SESSION_GAP_HOURS = 6.0
 
 
 EXERCISE_STRENGTH_PRIORS = {
@@ -220,6 +222,44 @@ def estimate_e1rm_candidate(
     return float(candidate)
 
 
+def coerce_timestamp(ts) -> datetime | None:
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        return ts.replace(tzinfo=None)
+    to_pydatetime = getattr(ts, "to_pydatetime", None)
+    if callable(to_pydatetime):
+        return to_pydatetime().replace(tzinfo=None)
+    if isinstance(ts, np.datetime64):
+        try:
+            return datetime.fromisoformat(str(ts)).replace(tzinfo=None)
+        except ValueError:
+            return None
+    s = str(ts).strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def is_new_session(
+    previous_timestamp,
+    current_timestamp,
+    *,
+    session_gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
+) -> bool:
+    prev_dt = coerce_timestamp(previous_timestamp)
+    curr_dt = coerce_timestamp(current_timestamp)
+    if prev_dt is None or curr_dt is None:
+        return False
+    gap_hours = (curr_dt - prev_dt).total_seconds() / 3600.0
+    if not np.isfinite(gap_hours):
+        return False
+    return gap_hours > float(session_gap_hours)
+
+
 def _score_update_candidate(
     reps: float,
     rir: float,
@@ -381,3 +421,45 @@ def update_strength_anchors(
         result = {anchor_name: float(new_anchors[idx]) for idx, anchor_name in enumerate(ANCHOR_NAMES)}
         return result, details
     return new_anchors
+
+
+def build_anchor_history_from_completed_sets(
+    strength_anchors,
+    completed_sets: list[dict],
+    *,
+    session_gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
+    apply_trailing_session: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    current_anchors = resolve_anchor_values(anchor_values=strength_anchors)
+    anchor_history = []
+    pending_session = []
+    previous_timestamp = None
+
+    for entry in completed_sets:
+        timestamp = entry.get("timestamp")
+        if pending_session and is_new_session(
+            previous_timestamp,
+            timestamp,
+            session_gap_hours=session_gap_hours,
+        ):
+            current_anchors = resolve_anchor_values(
+                anchor_values=update_strength_anchors(current_anchors, pending_session)
+            )
+            pending_session = []
+
+        anchor_history.append(current_anchors.copy())
+        pending_session.append(entry)
+        previous_timestamp = timestamp
+
+    final_anchors = current_anchors.copy()
+    if pending_session and apply_trailing_session:
+        final_anchors = resolve_anchor_values(
+            anchor_values=update_strength_anchors(current_anchors, pending_session)
+        )
+
+    if anchor_history:
+        history_array = np.stack(anchor_history, axis=0).astype(np.float32, copy=False)
+    else:
+        history_array = np.zeros((0, len(ANCHOR_NAMES)), dtype=np.float32)
+
+    return history_array, np.asarray(final_anchors, dtype=np.float32)
