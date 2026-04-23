@@ -23,6 +23,12 @@ DEFAULT_ANCHOR_VALUES_KG = {
     "squat": 140.0,
     "deadlift": 180.0,
 }
+DEFAULT_UPDATE_ALPHA = 0.10
+DEFAULT_UPDATE_MAX_RELATIVE_CHANGE = 0.025
+DEFAULT_UPDATE_MIN_RELATIVE_LOAD = 0.50
+DEFAULT_UPDATE_MAX_REPS = 10
+DEFAULT_UPDATE_MAX_RIR = 3
+DEFAULT_UPDATE_TOP_K = 3
 
 
 EXERCISE_STRENGTH_PRIORS = {
@@ -80,6 +86,33 @@ def build_anchor_ratio_matrix(exercises: list[str]) -> tuple[np.ndarray, np.ndar
         available[exercise_idx] = 1.0
 
     return matrix, available
+
+
+def get_exercise_strength_prior(exercise: str) -> dict | None:
+    return EXERCISE_STRENGTH_PRIORS.get(exercise)
+
+
+def get_exercise_anchor_name(exercise: str) -> str | None:
+    prior = get_exercise_strength_prior(exercise)
+    if not prior:
+        return None
+    anchor_name = prior["anchor_lift"]
+    if anchor_name not in ANCHOR_NAMES:
+        return None
+    return anchor_name
+
+
+def get_exercise_anchor_ratio(exercise: str) -> float | None:
+    prior = get_exercise_strength_prior(exercise)
+    if not prior:
+        return None
+    anchor_name = prior["anchor_lift"]
+    if anchor_name not in ANCHOR_NAMES:
+        return None
+    ratio = float(prior["ratio_mean"])
+    if not np.isfinite(ratio) or ratio <= 0.0:
+        return None
+    return ratio
 
 
 def default_anchor_array_kg() -> np.ndarray:
@@ -144,3 +177,207 @@ def resolve_anchor_values(anchor_values=None, records=None, defaults=None) -> np
                 return resolved
 
     return default_arr
+
+
+def project_exercise_1rm_kg(exercise: str, anchor_values=None, defaults=None) -> float | None:
+    anchors = coerce_anchor_values(anchor_values, defaults=defaults)
+    anchor_name = get_exercise_anchor_name(exercise)
+    ratio = get_exercise_anchor_ratio(exercise)
+    if anchor_name is None or ratio is None:
+        return None
+    anchor_idx = ANCHOR_NAMES.index(anchor_name)
+    projected = float(anchors[anchor_idx] * ratio)
+    if not np.isfinite(projected) or projected <= 0.0:
+        return None
+    return projected
+
+
+def estimate_e1rm_candidate(
+    weight_kg: float,
+    reps: int,
+    rir: float,
+) -> float | None:
+    """Estimate e1RM from a completed set using Epley + RIR."""
+    try:
+        weight_kg = float(weight_kg)
+        reps = float(reps)
+        rir = float(rir)
+    except (TypeError, ValueError):
+        return None
+
+    if not np.isfinite(weight_kg) or not np.isfinite(reps) or not np.isfinite(rir):
+        return None
+    if weight_kg <= 0.0 or reps <= 0.0 or rir < 0.0:
+        return None
+
+    reps_to_failure = reps + rir
+    if reps_to_failure <= 0.0:
+        return None
+
+    candidate = weight_kg * (1.0 + reps_to_failure / 30.0)
+    if not np.isfinite(candidate) or candidate <= 0.0:
+        return None
+    return float(candidate)
+
+
+def _score_update_candidate(
+    reps: float,
+    rir: float,
+    relative_load: float,
+    *,
+    min_relative_load: float,
+    max_rir: float,
+) -> float:
+    load_score = np.clip((relative_load - min_relative_load) / max(1.0 - min_relative_load, 1e-6), 0.0, 1.0)
+    rir_score = np.clip((max_rir + 1.0 - rir) / (max_rir + 1.0), 0.0, 1.0)
+    reps_score = np.clip(1.0 - abs(reps - 5.0) / 7.0, 0.25, 1.0)
+    return float(0.50 * load_score + 0.30 * rir_score + 0.20 * reps_score)
+
+
+def collect_strength_update_candidates(
+    completed_sets: list[dict],
+    strength_anchors=None,
+    *,
+    min_relative_load: float = DEFAULT_UPDATE_MIN_RELATIVE_LOAD,
+    max_reps: int = DEFAULT_UPDATE_MAX_REPS,
+    max_rir: int = DEFAULT_UPDATE_MAX_RIR,
+) -> list[dict]:
+    """Collect high-quality anchor update candidates from completed sets."""
+    anchors_kg = resolve_anchor_values(anchor_values=strength_anchors)
+    candidates = []
+
+    for entry in completed_sets:
+        exercise = entry.get("exercise", "")
+        anchor_name = get_exercise_anchor_name(exercise)
+        ratio = get_exercise_anchor_ratio(exercise)
+        if anchor_name is None or ratio is None:
+            continue
+
+        try:
+            weight_kg = float(entry["weight_kg"])
+            reps = int(entry["reps"])
+            rir = float(entry["rir"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if weight_kg <= 0.0 or reps <= 0 or reps > max_reps or rir < 0.0 or rir > max_rir:
+            continue
+
+        projected_1rm = project_exercise_1rm_kg(exercise, anchors_kg)
+        if projected_1rm is None or projected_1rm <= 0.0:
+            continue
+
+        relative_load = weight_kg / projected_1rm
+        if not np.isfinite(relative_load) or relative_load < min_relative_load:
+            continue
+
+        e1rm_candidate = estimate_e1rm_candidate(weight_kg, reps, rir)
+        if e1rm_candidate is None:
+            continue
+
+        anchor_candidate = e1rm_candidate / ratio
+        if not np.isfinite(anchor_candidate) or anchor_candidate <= 0.0:
+            continue
+
+        candidates.append(
+            {
+                "exercise": exercise,
+                "anchor_name": anchor_name,
+                "weight_kg": weight_kg,
+                "reps": reps,
+                "rir": rir,
+                "relative_load": float(relative_load),
+                "projected_1rm": float(projected_1rm),
+                "exercise_candidate_1rm": float(e1rm_candidate),
+                "anchor_candidate_1rm": float(anchor_candidate),
+                "quality": _score_update_candidate(
+                    reps,
+                    rir,
+                    relative_load,
+                    min_relative_load=min_relative_load,
+                    max_rir=max_rir,
+                ),
+                "timestamp": entry.get("timestamp"),
+            }
+        )
+
+    return candidates
+
+
+def update_strength_anchors(
+    strength_anchors,
+    completed_sets: list[dict],
+    *,
+    alpha: float = DEFAULT_UPDATE_ALPHA,
+    max_relative_change: float = DEFAULT_UPDATE_MAX_RELATIVE_CHANGE,
+    min_relative_load: float = DEFAULT_UPDATE_MIN_RELATIVE_LOAD,
+    max_reps: int = DEFAULT_UPDATE_MAX_REPS,
+    max_rir: int = DEFAULT_UPDATE_MAX_RIR,
+    top_k_per_anchor: int = DEFAULT_UPDATE_TOP_K,
+    return_details: bool = False,
+):
+    """Update bench/squat/deadlift anchors from completed sets."""
+    current_anchors = resolve_anchor_values(anchor_values=strength_anchors)
+    new_anchors = current_anchors.copy()
+    alpha = float(np.clip(alpha, 0.0, 1.0))
+    max_relative_change = float(max(0.0, max_relative_change))
+    top_k_per_anchor = max(1, int(top_k_per_anchor))
+
+    candidates = collect_strength_update_candidates(
+        completed_sets,
+        current_anchors,
+        min_relative_load=min_relative_load,
+        max_reps=max_reps,
+        max_rir=max_rir,
+    )
+
+    grouped = {anchor_name: [] for anchor_name in ANCHOR_NAMES}
+    for candidate in candidates:
+        grouped[candidate["anchor_name"]].append(candidate)
+
+    details = {}
+    for anchor_idx, anchor_name in enumerate(ANCHOR_NAMES):
+        current_value = float(current_anchors[anchor_idx])
+        anchor_candidates = sorted(
+            grouped[anchor_name],
+            key=lambda item: (item["quality"], item["relative_load"]),
+            reverse=True,
+        )
+
+        if not anchor_candidates:
+            details[anchor_name] = {
+                "updated": False,
+                "old_1rm": current_value,
+                "new_1rm": current_value,
+                "n_candidates": 0,
+                "selected_exercises": [],
+            }
+            continue
+
+        selected = anchor_candidates[:top_k_per_anchor]
+        weights = np.array([max(item["quality"], 1e-6) for item in selected], dtype=np.float32)
+        values = np.array([item["anchor_candidate_1rm"] for item in selected], dtype=np.float32)
+        session_candidate = float(np.average(values, weights=weights))
+
+        blended = (1.0 - alpha) * current_value + alpha * session_candidate
+        lower_bound = current_value * (1.0 - max_relative_change)
+        upper_bound = current_value * (1.0 + max_relative_change)
+        new_value = float(np.clip(blended, lower_bound, upper_bound))
+        new_anchors[anchor_idx] = new_value
+
+        details[anchor_name] = {
+            "updated": True,
+            "old_1rm": current_value,
+            "new_1rm": new_value,
+            "session_candidate": session_candidate,
+            "alpha": alpha,
+            "n_candidates": len(anchor_candidates),
+            "n_selected": len(selected),
+            "selected_exercises": [item["exercise"] for item in selected],
+            "selected_relative_loads": [float(item["relative_load"]) for item in selected],
+        }
+
+    if return_details:
+        result = {anchor_name: float(new_anchors[idx]) for idx, anchor_name in enumerate(ANCHOR_NAMES)}
+        return result, details
+    return new_anchors

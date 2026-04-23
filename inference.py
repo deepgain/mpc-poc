@@ -28,7 +28,24 @@ import torch
 import torch.nn as nn
 import warnings
 
-from strength_priors import ANCHOR_NAMES, build_anchor_ratio_matrix, coerce_anchor_values, resolve_anchor_values
+from strength_priors import (
+    ANCHOR_NAMES,
+    build_anchor_ratio_matrix,
+    DEFAULT_UPDATE_ALPHA,
+    DEFAULT_UPDATE_MAX_RELATIVE_CHANGE,
+    DEFAULT_UPDATE_MAX_REPS,
+    DEFAULT_UPDATE_MAX_RIR,
+    DEFAULT_UPDATE_MIN_RELATIVE_LOAD,
+    DEFAULT_UPDATE_TOP_K,
+    collect_strength_update_candidates,
+    coerce_anchor_values,
+    estimate_e1rm_candidate,
+    get_exercise_anchor_name,
+    get_exercise_anchor_ratio,
+    project_exercise_1rm_kg,
+    resolve_anchor_values,
+    update_strength_anchors,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -492,6 +509,14 @@ def predict_rir(
         rir_norm = model.predict_rir_norm(ei, w_t, r_t, mpc_t, anchors_t)
 
     return float(np.clip(float(rir_norm.item()) * RIR_SCALE, 0.0, 5.0))
+
+
+def project_exercise_1rm(
+    exercise: str,
+    strength_anchors=None,
+) -> float | None:
+    """Project exercise-specific 1RM from the current anchor state."""
+    return project_exercise_1rm_kg(exercise, strength_anchors)
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────

@@ -1,98 +1,93 @@
-# README — Static 1RM Anchors Variant
+# README — Dynamic 1RM Anchors Variant
 
 ## Cel
 
-Ta gałąź dodaje do modelu informację o sile użytkownika przez 3 onboardingowe anchory:
+Ta gałąź naprawia lukę w modelu, który wcześniej nie rozróżniał dwóch użytkowników o różnym poziomie siły dla tego samego seta.
+
+Wariant końcowy rozdziela dwa sygnały:
+
+- `MPC` = bieżące zmęczenie / świeżość
+- `1RM anchors` = poziom siły użytkownika
+
+Użytkownik startuje z 3 anchorami:
 
 - `bench_press 1RM`
 - `squat 1RM`
 - `deadlift 1RM`
 
-Problem, który to adresuje:
-- wcześniej model dostawał tylko `exercise + weight + reps + MPC`
-- więc dla dwóch użytkowników o różnej sile ten sam set mógł wyglądać prawie identycznie
-- model nie wiedział, czy `80 kg` to dla kogoś `80% 1RM`, czy `130% 1RM`
-
-## Co zostało zrobione
-
-### 1. Nowy sygnał siły użytkownika
-
-Do danych wejściowych modelu dochodzą anchory:
-
-- `config_1rm_bench_press`
-- `config_1rm_squat`
-- `config_1rm_deadlift`
-
-Na ich podstawie dla każdego ćwiczenia liczona jest projekcja:
+Na ich podstawie model liczy dla każdego ćwiczenia:
 
 - `projected_1rm`
 - `relative_load = weight / projected_1rm`
 - `projection_available`
 
-### 2. Wspólna tabela priors
+## Co zostało zrobione
 
-Dodany został plik [strength_priors.py](/Users/michal/Documents/WB2/mpc-poc/strength_priors.py), który zawiera:
+### 1. Wspólna logika priors i update'u
+
+Plik [strength_priors.py](/Users/michal/Documents/WB2/mpc-poc/strength_priors.py) jest wspólnym modułem dla treningu, inference i walidacji.
+
+Zawiera:
 
 - mapowanie `exercise -> anchor`
-- `ratio_mean` dla projekcji siły na pozostałe ćwiczenia
-- helpery do parsowania anchorów z danych i inference
+- `ratio_mean` dla projekcji siły
+- parsowanie onboardingowych anchorów `config_1rm_*`
+- projekcję `exercise 1RM <- anchor`
+- update anchorów z `weight + reps + RIR`
 
-### 3. Zmiany w treningu
+Aktualizacja anchorów działa przez:
+
+- kandydat `e1RM` liczony z `Epley + RIR`
+- filtrowanie jakości setów
+- przeliczenie z wariacji ćwiczenia na właściwy anchor
+- miękki update z limitem zmiany
+
+### 2. Dynamiczne `estimated_1rm_before_set` w treningu
 
 W [train.py](/Users/michal/Documents/WB2/mpc-poc/train.py):
 
-- loader czyta nowe kolumny `config_1rm_*`
-- batch trzyma anchory per user
-- `f_net` i `g_net` dostały nowe feature’y siły
-- trening korzysta z nowego pełnego datasetu `training_data.csv`
+- loader czyta `config_1rm_bench_press`, `config_1rm_squat`, `config_1rm_deadlift`
+- dla każdego usera budowany jest kauzalny stan anchorów przed każdym setem
+- model dostaje już nie stałe anchory onboardingowe, tylko `anchors_before_set`
+- `f_net` i `g_net` korzystają z nowych cech siły w każdym kroku sekwencji
 
-### 4. Zmiany w inference
+To oznacza, że trening jest już spójny z założeniem:
+
+- `dynamic fatigue`
+- `dynamic strength`
+
+bez leakage, bo anchor dla seta `t` powstaje wyłącznie z przeszłości.
+
+### 3. Inference zgodne z nową wersją
 
 W [inference.py](/Users/michal/Documents/WB2/mpc-poc/inference.py):
 
+- `predict_mpc(...)` przyjmuje opcjonalne `strength_anchors`
 - `predict_rir(...)` przyjmuje opcjonalne `strength_anchors`
-- `predict_mpc(...)` też może dostać anchory lub wyciągnąć je z historii
-- `load_model(...)` wykrywa, czy checkpoint jest stary czy nowy
+- `load_model(...)` wykrywa stare vs nowe checkpointy przez `strength_feature_dim`
+- `update_strength_anchors(...)` umożliwia aktualizację anchorów po realnych setach / sesji
 
-Stary checkpoint:
-- ładuje się poprawnie
-- ale nie korzysta z nowych feature’ów siły
+Inference jest więc gotowe do użycia z plannerem:
 
-Nowy checkpoint:
-- ma `strength_feature_dim > 0`
-- używa anchorów w predykcji
+- onboarding daje 3 anchory
+- planner używa ich przy predykcji
+- po sesji anchory mogą zostać zaktualizowane na przyszłość
 
-## Co ten wariant teraz potrafi
+### 4. Walidacja
 
-Model odróżnia użytkowników o różnym poziomie siły przy tym samym secie.
+Są dwa poziomy walidacji:
 
-Przykład:
-- ten sam `exercise`
-- ta sama `weight`
-- te same `reps`
-- ten sam świeży `MPC`
-- różne `1RM`
+- [test.py](/Users/michal/Documents/WB2/mpc-poc/test.py)
+- [validate_1rm_dynamics.py](/Users/michal/Documents/WB2/mpc-poc/validate_1rm_dynamics.py)
 
-W takiej sytuacji model zwraca różne `RIR`.
+#### `test.py`
 
-To było sprawdzone probe’em w [test.py](/Users/michal/Documents/WB2/mpc-poc/test.py).
+Sprawdza:
 
-## Co testuje `test.py`
-
-Plik [test.py](/Users/michal/Documents/WB2/mpc-poc/test.py) sprawdza:
-
-1. Czy checkpoint faktycznie ma strength features:
-   - `strength_feature_dim > 0`
-
-2. Czy dla profili `weak / base / strong` model daje różne `RIR`
-
-3. Czy `RIR` rośnie monotonicznie przy zwiększaniu właściwego anchora:
-   - pressy reagują na `bench_press`
-   - squat family reaguje na `squat`
-   - deadlift family reaguje na `deadlift`
-
-4. Diagnostycznie:
-   - jak bardzo ćwiczenia reagują na niepowiązane anchory
+1. czy checkpoint ma `strength_feature_dim > 0`
+2. czy model rozróżnia profile `weak / base / strong`
+3. czy `RIR` rośnie monotonicznie przy zmianie właściwego anchora
+4. czy update anchorów działa w dobrą stronę
 
 Uruchomienie:
 
@@ -100,44 +95,63 @@ Uruchomienie:
 ./venv/bin/python test.py
 ```
 
+#### `validate_1rm_dynamics.py`
+
+Sprawdza na holdoucie trzy warianty:
+
+- `dynamic_correct`
+- `static_onboarding`
+- `shuffled_dynamic`
+
+Uruchomienie:
+
+```bash
+./venv/bin/python validate_1rm_dynamics.py --num-users 63
+```
+
+Wynik dla pełnego holdoutu:
+
+- `dynamic_correct   rmse=0.9129 mae=0.7083 corr=0.8620`
+- `static_onboarding rmse=1.0231 mae=0.7972 corr=0.8296`
+- `shuffled_dynamic  rmse=1.2920 mae=0.9317 corr=0.7202`
+
+Wniosek:
+
+- dynamiczne anchory wygrywają ze statycznym onboardingiem
+- poprawne anchory wygrywają z anchorami błędnie przypisanymi
+
 ## Najnowsze wykresy
 
-Wyniki ostatniego treningu są w:
+Ostatni pełny run jest w:
 
-- [charts/20260422_1759](/Users/michal/Documents/WB2/mpc-poc/charts/20260422_1759)
+- [charts/20260423_0945](/Users/michal/Documents/WB2/mpc-poc/charts/20260423_0945)
 
 Najważniejsze pliki:
 
-- [chart_loss_curves.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260422_1759/chart_loss_curves.png)
-- [chart_rir_accuracy.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260422_1759/chart_rir_accuracy.png)
-- [chart_transfer_matrix.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260422_1759/chart_transfer_matrix.png)
-- [chart_rir_sensitivity.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260422_1759/chart_rir_sensitivity.png)
+- [chart_loss_curves.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260423_0945/chart_loss_curves.png)
+- [chart_rir_accuracy.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260423_0945/chart_rir_accuracy.png)
+- [chart_strength_anchor_trajectories.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260423_0945/chart_strength_anchor_trajectories.png)
+- [chart_strength_sweeps.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260423_0945/chart_strength_sweeps.png)
+- [chart_dynamic_vs_static_rir.png](/Users/michal/Documents/WB2/mpc-poc/charts/20260423_0945/chart_dynamic_vs_static_rir.png)
 
-## Czego jeszcze nie ma
+## Co ten wariant dziś potrafi
 
-Ten wariant jest **statyczny** po stronie siły użytkownika.
+- model odróżnia użytkowników o różnym poziomie siły
+- train i inference używają tej samej logiki priors
+- anchor `1RM` może zmieniać się w czasie
+- dynamiczne `estimated_1rm_before_set` poprawia predykcję względem stałych anchorów onboardingowych
 
-To znaczy:
+## Ograniczenia obecnej wersji
 
-- `MPC` zmienia się w czasie
-- anchory `1RM` są na razie stałe
-- nie ma jeszcze update’u `1RM` po sesjach treningowych
+- update anchorów w treningu jest obecnie `per-set`, nie `per-session`
+- statystyki walidacyjne pokazują bias anchorów w dół, więc updater jest skuteczny, ale niekoniecznie idealnie skalibrowany
+- ćwiczenia `bodyweight/core/carry` nie mają pełnego odpowiednika 4. anchora (`bodyweight`)
 
-Czyli obecnie model zakłada:
+## Najbliższy kolejny krok
 
-- `dynamic fatigue`
-- `static strength`
+Najbardziej sensowny następny eksperyment:
 
-## Kolejny krok
+- porównać `per-set update` vs `per-session update`
+- ewentualnie dać osobne tempo update'u dla wzrostów i spadków anchorów
 
-Następny etap to dynamiczny update anchorów `1RM`, np.:
-
-- po treningu
-- na podstawie `weight + reps + RIR`
-- bez data leakage
-
-Docelowy kierunek:
-
-- `MPC` dalej modeluje zmęczenie
-- `1RM` anchory modelują siłę
-- anchory są aktualizowane w czasie wraz z historią użytkownika
+Ale na obecnym etapie wariant jest już technicznie i empirycznie obroniony.

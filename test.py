@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from inference import get_exercises, get_muscles, load_model, predict_rir
+from inference import get_exercises, get_muscles, load_model, predict_rir, update_strength_anchors
 
 
 CHECKPOINT_PATH = "deepgain_model_best.pt"
@@ -26,6 +26,35 @@ TEST_CASES = [
     ("deadlift", 140.0, 5, "deadlift"),
     ("sumo_deadlift", 140.0, 5, "deadlift"),
     ("rdl", 110.0, 8, "deadlift"),
+]
+UPDATE_DEMOS = [
+    (
+        "bench_press",
+        [
+            {"exercise": "bench_press", "weight_kg": 90.0, "reps": 5, "rir": 1},
+            {"exercise": "incline_bench", "weight_kg": 75.0, "reps": 6, "rir": 1},
+            {"exercise": "ohp", "weight_kg": 55.0, "reps": 5, "rir": 1},
+        ],
+        ("bench_press", 80.0, 5),
+    ),
+    (
+        "squat",
+        [
+            {"exercise": "squat", "weight_kg": 130.0, "reps": 5, "rir": 1},
+            {"exercise": "high_bar_squat", "weight_kg": 120.0, "reps": 5, "rir": 1},
+            {"exercise": "leg_press", "weight_kg": 200.0, "reps": 8, "rir": 2},
+        ],
+        ("squat", 120.0, 5),
+    ),
+    (
+        "deadlift",
+        [
+            {"exercise": "deadlift", "weight_kg": 160.0, "reps": 5, "rir": 1},
+            {"exercise": "sumo_deadlift", "weight_kg": 150.0, "reps": 5, "rir": 1},
+            {"exercise": "rdl", "weight_kg": 120.0, "reps": 8, "rir": 2},
+        ],
+        ("deadlift", 140.0, 5),
+    ),
 ]
 
 
@@ -129,6 +158,58 @@ def print_isolation_diagnostics(model, exercises: set[str]) -> None:
     print()
 
 
+def print_anchor_update_demos(model) -> bool:
+    print("== Anchor Update Demos ==")
+    ok = True
+    for anchor_name, session_sets, probe in UPDATE_DEMOS:
+        updated_anchors, details = update_strength_anchors(
+            dict(BASE_ANCHORS),
+            session_sets,
+            return_details=True,
+        )
+        old_value = BASE_ANCHORS[anchor_name]
+        new_value = updated_anchors[anchor_name]
+        unchanged_others = all(
+            abs(updated_anchors[other] - BASE_ANCHORS[other]) < 1e-9
+            for other in BASE_ANCHORS
+            if other != anchor_name
+        )
+        probe_before = predict_case(model, probe[0], probe[1], probe[2], dict(BASE_ANCHORS))
+        probe_after = predict_case(model, probe[0], probe[1], probe[2], updated_anchors)
+        detail = details[anchor_name]
+        passed = (
+            detail["updated"]
+            and new_value > old_value
+            and unchanged_others
+            and probe_after >= probe_before - 1e-6
+        )
+        ok = ok and passed
+        status = "PASS" if passed else "FAIL"
+        print(
+            f"{status:4s} {anchor_name:11s} "
+            f"old={old_value:.2f} new={new_value:.2f} "
+            f"probe_before={probe_before:.3f} probe_after={probe_after:.3f} "
+            f"selected={detail['selected_exercises']}"
+        )
+
+    low_quality_session = [
+        {"exercise": "bench_press", "weight_kg": 40.0, "reps": 12, "rir": 4},
+        {"exercise": "ohp", "weight_kg": 20.0, "reps": 12, "rir": 4},
+    ]
+    no_update_anchors, no_update_details = update_strength_anchors(
+        dict(BASE_ANCHORS),
+        low_quality_session,
+        return_details=True,
+    )
+    no_update_pass = all(abs(no_update_anchors[key] - BASE_ANCHORS[key]) < 1e-9 for key in BASE_ANCHORS)
+    ok = ok and no_update_pass
+    status = "PASS" if no_update_pass else "FAIL"
+    counts = {key: value["n_candidates"] for key, value in no_update_details.items()}
+    print(f"{status:4s} low_quality_session anchors_unchanged={no_update_pass} candidates={counts}")
+    print()
+    return ok
+
+
 def main() -> int:
     model = load_model(CHECKPOINT_PATH)
     exercises = set(get_exercises())
@@ -144,8 +225,9 @@ def main() -> int:
     contrast_ok = print_profile_contrast(model, exercises)
     sweep_ok = print_relevant_anchor_sweeps(model, exercises)
     print_isolation_diagnostics(model, exercises)
+    update_ok = print_anchor_update_demos(model)
 
-    if contrast_ok and sweep_ok:
+    if contrast_ok and sweep_ok and update_ok:
         print("OVERALL: PASS")
         return 0
 

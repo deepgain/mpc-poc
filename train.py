@@ -18,7 +18,14 @@ import time
 from datetime import datetime
 warnings.filterwarnings("ignore")
 
-from strength_priors import ANCHOR_COLUMNS, ANCHOR_NAMES, build_anchor_ratio_matrix, coerce_anchor_values
+from strength_priors import (
+    ANCHOR_COLUMNS,
+    ANCHOR_NAMES,
+    build_anchor_ratio_matrix,
+    coerce_anchor_values,
+    default_anchor_array_kg,
+    update_strength_anchors,
+)
 
 if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
@@ -32,7 +39,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 64
 HIDDEN_DIM = 512
 LR = 1e-3
-EPOCHS = 5
+EPOCHS = 25
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -259,7 +266,22 @@ print(
 def build_user_sequences(user_df):
     sequences = []
     for uid, grp in user_df.groupby("user_id"):
-        anchors_kg = coerce_anchor_values(grp.iloc[0].to_dict(), defaults=DEFAULT_STRENGTH_ANCHORS_KG)
+        current_anchors_kg = coerce_anchor_values(grp.iloc[0].to_dict(), defaults=DEFAULT_STRENGTH_ANCHORS_KG)
+        anchor_history = []
+        for row in grp.itertuples(index=False):
+            anchor_history.append((current_anchors_kg / WEIGHT_SCALE).astype(np.float32).copy())
+            current_anchors_kg = update_strength_anchors(
+                current_anchors_kg,
+                [
+                    {
+                        "exercise": row.exercise,
+                        "weight_kg": float(row.weight_kg),
+                        "reps": int(row.reps),
+                        "rir": float(row.rir),
+                        "timestamp": row.timestamp,
+                    }
+                ],
+            )
         seq = {
             "user_id": uid,
             "exercise_idx": torch.tensor(grp["exercise_idx"].values, dtype=torch.long),
@@ -269,7 +291,7 @@ def build_user_sequences(user_df):
             "delta_t": torch.tensor(
                 np.log1p(grp["delta_t_hours"].values) / DT_SCALE, dtype=torch.float32
             ),
-            "anchors": torch.tensor((anchors_kg / WEIGHT_SCALE).astype(np.float32), dtype=torch.float32),
+            "anchors": torch.tensor(np.stack(anchor_history, axis=0), dtype=torch.float32),
             "timestamps": grp["timestamp"].values,
         }
         sequences.append(seq)
@@ -289,7 +311,7 @@ def chunk_sequence(seq, chunk_len):
             "reps": seq["reps"][start:end],
             "rir": seq["rir"][start:end],
             "delta_t": seq["delta_t"][start:end],
-            "anchors": seq["anchors"],
+            "anchors": seq["anchors"][start:end],
         }
         if "timestamps" in seq:
             chunk["timestamps"] = seq["timestamps"][start:end]
@@ -318,7 +340,7 @@ def collate_fn(batch):
         "reps": torch.zeros(B, max_len),
         "rir": torch.zeros(B, max_len),
         "delta_t": torch.zeros(B, max_len),
-        "anchors": torch.zeros(B, NUM_STRENGTH_ANCHORS),
+        "anchors": torch.zeros(B, max_len, NUM_STRENGTH_ANCHORS),
         "mask": torch.zeros(B, max_len),
     }
     for i, b in enumerate(batch):
@@ -328,7 +350,7 @@ def collate_fn(batch):
         out["reps"][i, :T] = b["reps"]
         out["rir"][i, :T] = b["rir"]
         out["delta_t"][i, :T] = b["delta_t"]
-        out["anchors"][i] = b["anchors"]
+        out["anchors"][i, :T] = b["anchors"]
         out["mask"][i, :T] = 1.0
     return out
 
@@ -700,7 +722,8 @@ class DeepGainModel(nn.Module):
                 mpc = self.r(mpc_flat, dt_exp, m_idx_flat).reshape(B, M)
 
             e_idx = exercise_idx[:, t]
-            rir_pred = self.predict_rir_norm(e_idx, weight[:, t], reps[:, t], mpc, anchors)
+            anchors_t = anchors[:, t]
+            rir_pred = self.predict_rir_norm(e_idx, weight[:, t], reps[:, t], mpc, anchors_t)
             rir_preds.append(rir_pred)
 
             inv = self.involvement[e_idx]
@@ -710,7 +733,7 @@ class DeepGainModel(nn.Module):
             rir_exp = rir_target[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
             mpc_flat = mpc.reshape(-1)
             m_emb_flat = all_m_embed_expanded.reshape(-1, E)
-            anchor_exp = anchors.unsqueeze(1).expand(-1, M, -1).reshape(-1, NUM_STRENGTH_ANCHORS)
+            anchor_exp = anchors_t.unsqueeze(1).expand(-1, M, -1).reshape(-1, NUM_STRENGTH_ANCHORS)
             drop = self.predict_drop_norm(e_idx_exp, w_exp, r_exp, rir_exp, mpc_flat, m_emb_flat, anchor_exp)
             drop = drop.reshape(B, M)
             mpc = (mpc * (1.0 - inv * drop)).clamp(min=0.1)
@@ -742,7 +765,8 @@ class DeepGainModel(nn.Module):
                 mpc = self.r(mpc_flat, dt_exp, m_idx_flat).reshape(1, M)
 
             e_idx = exercise_idx[:, t]
-            rir_pred = self.predict_rir_norm(e_idx, weight[:, t], reps[:, t], mpc, anchors)
+            anchors_t = anchors[:, t]
+            rir_pred = self.predict_rir_norm(e_idx, weight[:, t], reps[:, t], mpc, anchors_t)
             rir_preds.append(rir_pred.item())
 
             inv = self.involvement[e_idx]
@@ -752,7 +776,7 @@ class DeepGainModel(nn.Module):
             rir_exp = rir_target[:, t].unsqueeze(1).expand(-1, M).reshape(-1)
             mpc_flat = mpc.reshape(-1)
             m_emb_flat = all_m_embed_expanded.reshape(-1, E)
-            anchor_exp = anchors.unsqueeze(1).expand(-1, M, -1).reshape(-1, NUM_STRENGTH_ANCHORS)
+            anchor_exp = anchors_t.unsqueeze(1).expand(-1, M, -1).reshape(-1, NUM_STRENGTH_ANCHORS)
             drop = self.predict_drop_norm(e_idx_exp, w_exp, r_exp, rir_exp, mpc_flat, m_emb_flat, anchor_exp).reshape(1, M)
             mpc = (mpc * (1.0 - inv * drop)).clamp(min=0.1)
             mpc_history.append(mpc[0].detach().cpu().numpy().copy())
@@ -1456,5 +1480,139 @@ for seq in sample_users:
     plt.tight_layout()
     plt.savefig(f"{CHART_DIR}/chart_mpc_per_muscle_{uid}.png", dpi=150)
     print(f"Saved chart_mpc_per_muscle_{uid}.png")
+
+# ── Chart 10: Strength-anchor trajectories for sample users ──────────────────
+anchor_colors = {
+    "bench_press": "#1f77b4",
+    "squat": "#2ca02c",
+    "deadlift": "#d62728",
+}
+fig, axes = plt.subplots(len(sample_users), 1, figsize=(16, 4.2 * len(sample_users)), sharex=False)
+if len(sample_users) == 1:
+    axes = [axes]
+
+for ax, seq in zip(axes, sample_users):
+    T_plot = min(len(seq["exercise_idx"]), 400)
+    timestamps = seq["timestamps"][:T_plot]
+    t0_ts = timestamps[0]
+    days = np.array([(t - t0_ts) / np.timedelta64(1, "D") for t in timestamps], dtype=np.float32)
+    anchors_kg = seq["anchors"][:T_plot].cpu().numpy() * WEIGHT_SCALE
+    onboarding_kg = anchors_kg[0]
+
+    for idx, anchor_name in enumerate(ANCHOR_NAMES):
+        color = anchor_colors[anchor_name]
+        ax.plot(days, anchors_kg[:, idx], color=color, linewidth=2.0, label=f"{anchor_name} est.")
+        ax.axhline(onboarding_kg[idx], color=color, linestyle="--", linewidth=1.2, alpha=0.45)
+
+    anchor_change = anchors_kg[-1] - onboarding_kg
+    summary = ", ".join(
+        f"{anchor} {anchor_change[idx]:+.1f}kg" for idx, anchor in enumerate(ANCHOR_NAMES)
+    )
+    ax.set_title(f"{seq['user_id']} — Estimated Anchors Before Set ({summary})")
+    ax.set_ylabel("Anchor estimate (kg)")
+    ax.grid(True, alpha=0.25)
+    ax.legend(ncol=3, fontsize=8, loc="upper left")
+
+axes[-1].set_xlabel("Days since first set")
+plt.tight_layout()
+plt.savefig(f"{CHART_DIR}/chart_strength_anchor_trajectories.png", dpi=150)
+print("Saved chart_strength_anchor_trajectories.png")
+
+# ── Chart 11: Relevant 1RM sweeps for selected exercises ─────────────────────
+_strength_probe_cases = [
+    ("bench_press", 80.0, 5, "bench_press"),
+    ("ohp", 50.0, 5, "bench_press"),
+    ("incline_bench", 70.0, 6, "bench_press"),
+    ("squat", 120.0, 5, "squat"),
+    ("high_bar_squat", 105.0, 6, "squat"),
+    ("deadlift", 140.0, 5, "deadlift"),
+]
+_base_anchor_kg = default_anchor_array_kg()
+_base_anchor_map = {anchor: _base_anchor_kg[idx] for idx, anchor in enumerate(ANCHOR_NAMES)}
+_sweep_factors = np.linspace(0.6, 1.4, 17, dtype=np.float32)
+fig, axes = plt.subplots(2, 3, figsize=(18, 10), sharey=True)
+
+with torch.no_grad():
+    for ax, (exercise, weight_kg, reps_val, anchor_name) in zip(axes.reshape(-1), _strength_probe_cases):
+        anchor_idx = ANCHOR_NAMES.index(anchor_name)
+        anchor_grid_kg = np.tile(_base_anchor_kg, (len(_sweep_factors), 1))
+        anchor_grid_kg[:, anchor_idx] *= _sweep_factors
+
+        weight = torch.full((len(_sweep_factors),), weight_kg / WEIGHT_SCALE, dtype=torch.float32, device=DEVICE)
+        reps = torch.full((len(_sweep_factors),), reps_val / REPS_SCALE, dtype=torch.float32, device=DEVICE)
+        mpc = torch.ones(len(_sweep_factors), NUM_MUSCLES, dtype=torch.float32, device=DEVICE)
+        exercise_idx = torch.full(
+            (len(_sweep_factors),),
+            EXERCISE_TO_IDX[exercise],
+            dtype=torch.long,
+            device=DEVICE,
+        )
+        anchors = torch.tensor(anchor_grid_kg / WEIGHT_SCALE, dtype=torch.float32, device=DEVICE)
+        rir_vals = model.predict_rir_norm(exercise_idx, weight, reps, mpc, anchors).cpu().numpy() * RIR_SCALE
+
+        ax.plot(anchor_grid_kg[:, anchor_idx], rir_vals, linewidth=2.2, color=anchor_colors[anchor_name])
+        ax.axvline(_base_anchor_map[anchor_name], color="black", linestyle="--", linewidth=1.0, alpha=0.6)
+        ax.set_title(f"{exercise.replace('_', ' ')}\nweight={weight_kg:.0f}kg reps={reps_val}")
+        ax.set_xlabel(f"{anchor_name} anchor (kg)")
+        ax.set_ylabel("Predicted RIR")
+        ax.set_ylim(-0.1, 5.1)
+        ax.grid(True, alpha=0.25)
+
+plt.suptitle("Relevant 1RM Sweep — Fresh MPC, varying only the relevant anchor", fontsize=14)
+plt.tight_layout()
+plt.savefig(f"{CHART_DIR}/chart_strength_sweeps.png", dpi=150)
+print("Saved chart_strength_sweeps.png")
+
+# ── Chart 12: Dynamic vs static anchors on real holdout sequences ────────────
+fig, axes = plt.subplots(len(sample_users), 1, figsize=(16, 4.2 * len(sample_users)), sharex=False)
+if len(sample_users) == 1:
+    axes = [axes]
+
+with torch.no_grad():
+    for ax, seq in zip(axes, sample_users):
+        T_plot = min(len(seq["exercise_idx"]), 250)
+        ex = seq["exercise_idx"][:T_plot].unsqueeze(0).to(DEVICE)
+        w = seq["weight"][:T_plot].unsqueeze(0).to(DEVICE)
+        r = seq["reps"][:T_plot].unsqueeze(0).to(DEVICE)
+        rir_true = seq["rir"][:T_plot].unsqueeze(0).to(DEVICE)
+        dt = seq["delta_t"][:T_plot].unsqueeze(0).to(DEVICE)
+        dyn_anchors = seq["anchors"][:T_plot].unsqueeze(0).to(DEVICE)
+        static_anchor = seq["anchors"][0:1].repeat(T_plot, 1).unsqueeze(0).to(DEVICE)
+
+        rir_dyn, _ = model.forward_with_mpc_history(ex, w, r, rir_true, dt, dyn_anchors)
+        rir_static, _ = model.forward_with_mpc_history(ex, w, r, rir_true, dt, static_anchor)
+
+        timestamps = seq["timestamps"][:T_plot]
+        rir_actual = seq["rir"][:T_plot].cpu().numpy() * RIR_SCALE
+        rir_dyn = rir_dyn.squeeze(0).detach().cpu().numpy() * RIR_SCALE
+        rir_static = rir_static.squeeze(0).detach().cpu().numpy() * RIR_SCALE
+        x = np.arange(T_plot, dtype=np.int32)
+
+        ts_series = pd.Series(timestamps)
+        session_gap_hours = ts_series.diff().dt.total_seconds().div(3600.0).fillna(0.0)
+        session_starts = np.flatnonzero(session_gap_hours.to_numpy() > 6.0)
+
+        dyn_mae = float(np.mean(np.abs(rir_dyn - rir_actual)))
+        static_mae = float(np.mean(np.abs(rir_static - rir_actual)))
+
+        for start in session_starts:
+            ax.axvline(start - 0.5, color="#bbbbbb", linestyle=":", linewidth=0.9, alpha=0.9, zorder=0)
+
+        ax.scatter(x, rir_actual, color="black", s=16, alpha=0.85, label="actual RIR", zorder=3)
+        ax.plot(x, rir_dyn, color="#1f77b4", linewidth=1.8, label=f"dynamic anchors (MAE={dyn_mae:.2f})", zorder=2)
+        ax.plot(x, rir_static, color="#ff7f0e", linewidth=1.6, linestyle="--", label=f"static onboarding (MAE={static_mae:.2f})", zorder=2)
+        ax.set_title(
+            f"{seq['user_id']} — Dynamic vs static anchors by set "
+            f"(sets={T_plot}, sessions={len(session_starts) + 1})"
+        )
+        ax.set_ylabel("RIR")
+        ax.set_ylim(-0.1, 5.1)
+        ax.grid(True, alpha=0.25)
+        ax.legend(fontsize=8, loc="upper left")
+
+axes[-1].set_xlabel("Set index")
+plt.tight_layout()
+plt.savefig(f"{CHART_DIR}/chart_dynamic_vs_static_rir.png", dpi=150)
+print("Saved chart_dynamic_vs_static_rir.png")
 
 print("\nDone! All charts saved.")
