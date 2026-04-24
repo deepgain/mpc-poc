@@ -263,6 +263,149 @@ Nowe anchory są używane dopiero od kolejnej sesji / kolejnego replayu historii
 - Do update'u przekazuj pełne, zakończone sesje, nie pojedyncze sety z połowy treningu.
 - Traktuj `strength_anchors` jako stan użytkownika przechowywany po stronie backendu / planera.
 
+## Pitfalls — czego NIE robić
+
+### Brak `strength_anchors` = brak personalizacji
+
+Jeśli wywołasz `predict_rir(...)` lub `predict_mpc(...)` bez `strength_anchors`
+i bez `config_1rm_*` w historii, model użyje **domyślnych mediańnych wartości
+populacyjnych** zapisanych w checkpoincie. To oznacza:
+
+- wszyscy użytkownicy są traktowani jako "przeciętny lifter"
+- predykcje `RIR` przestają być personalizowane
+- nie dostaniesz błędu ani warninga — model po prostu zachowa się jak stary
+  wariant bez wariantu 2
+
+Przykład:
+
+```python
+# ŹLE — brak anchorów, model używa mediany populacyjnej
+rir = predict_rir(model, mpc, "bench_press", 80.0, 5)
+
+# OK — personalizacja działa
+rir = predict_rir(model, mpc, "bench_press", 80.0, 5,
+                  strength_anchors={"bench_press": 120.0,
+                                    "squat": 180.0,
+                                    "deadlift": 210.0})
+```
+
+**Zawsze przekazuj `strength_anchors`** jeśli chcesz personalnych predykcji.
+
+### Inne typowe błędy
+
+- Aktualizacja anchorów po każdym secie, nie po sesji — rekomendowany tryb to
+  pełna, zakończona sesja (co najmniej kilka dobrych setów).
+- Zapisanie anchorów w dataset raw CSV — anchory to stan runtime użytkownika,
+  nie część danych treningowych. Trzymaj je w backendzie / DB obok historii.
+- Używanie `predict_rir(...)` jako wskaźnika `1RM` — od tego jest
+  `project_exercise_1rm(...)`. `predict_rir` daje RIR przy konkretnym
+  `(weight, reps)`, nie szacunek maksimum.
+
+## Obsługiwane ćwiczenia
+
+Model obsługuje 34 ćwiczenia zakotwiczone do jednego z 4 anchorów.
+Anchor określa, przez który bój osobowy `1RM` danego ćwiczenia jest rzutowany
+(`exercise_1rm = anchor_1rm * ratio`).
+
+### Anchor: `bench_press`
+
+| Exercise | Ratio | Family |
+|---|---:|---|
+| `bench_press` | 1.000 | bench_primary |
+| `spoto_press` | 0.900 | bench_variant |
+| `decline_bench` | 0.900 | bench_variant |
+| `pendlay_row` | 0.890 | upper_pull |
+| `close_grip_bench` | 0.850 | bench_variant |
+| `chest_press_machine` | 0.840 | machine_press |
+| `incline_bench` | 0.815 | bench_variant |
+| `incline_bench_45` | 0.780 | bench_variant |
+| `seal_row` | 0.765 | upper_pull |
+| `lat_pulldown` | 0.680 | vertical_pull |
+| `dips` | 0.635 | press_assistance |
+| `ohp` | 0.620 | vertical_press |
+| `pull_up` | 0.565 | vertical_pull |
+| `skull_crusher` | 0.295 | triceps_isolation |
+| `dumbbell_flyes` | 0.290 | chest_isolation |
+
+### Anchor: `squat`
+
+| Exercise | Ratio | Family |
+|---|---:|---|
+| `leg_press` | 1.450 | machine_lower_compound |
+| `squat` | 1.000 | squat_primary |
+| `low_bar_squat` | 0.990 | squat_variant |
+| `high_bar_squat` | 0.960 | squat_variant |
+| `leg_extension` | 0.420 | quad_isolation |
+| `bulgarian_split_squat` | 0.400 | unilateral_lower |
+| `leg_curl` | 0.340 | hamstring_isolation |
+
+### Anchor: `deadlift`
+
+| Exercise | Ratio | Family |
+|---|---:|---|
+| `deadlift` | 1.000 | hinge_primary |
+| `sumo_deadlift` | 0.975 | hinge_variant |
+| `rdl` | 0.700 | hinge_variant |
+
+### Anchor: `bodyweight` (uwaga!)
+
+Te ćwiczenia są zakotwiczone do `bodyweight`, ale **obecny model nie przyjmuje
+masy ciała jako anchor** — onboarding zbiera tylko 3 boje siłowe. Dla tych
+ruchów `project_exercise_1rm(...)` zwraca `None`, a model używa fallbacka
+(populacyjne defaults z checkpointu) zamiast personalizowanej projekcji.
+
+| Exercise | Ratio | Family |
+|---|---:|---|
+| `farmers_walk` | 0.750 | carry |
+| `suitcase_carry` | 0.440 | unilateral_carry |
+| `ab_wheel` | 0.375 | core_anti_extension |
+| `plank` | 0.340 | core_bracing |
+| `leg_raises` | 0.290 | core_flexion |
+| `trx_bodysaw` | 0.290 | core_anti_extension |
+| `dead_bug` | 0.250 | core_stability |
+| `bird_dog` | 0.250 | core_stability |
+| `reverse_fly` | 0.120 | rear_delt_isolation |
+
+Predykcje `RIR`/`MPC` dla tych ćwiczeń dalej działają, tylko bez pełnej
+personalizacji siły.
+
+### Pełna lista źródłowa
+
+Kanoniczne źródło ratio/anchor to `strength_priors.EXERCISE_STRENGTH_PRIORS`.
+W razie wątpliwości:
+
+```python
+from strength_priors import EXERCISE_STRENGTH_PRIORS, get_exercise_anchor_name
+get_exercise_anchor_name("incline_bench")       # -> "bench_press"
+EXERCISE_STRENGTH_PRIORS["incline_bench"]
+# {'anchor_lift': 'bench_press', 'ratio_mean': 0.815, ...}
+```
+
+Alternatywnie `get_exercises()` z `inference.py` zwraca wszystkie ćwiczenia
+rozpoznawane przez załadowany model.
+
+## Smoke test
+
+W repo jest `test_inference_personalization.py` — skrypt end-to-end
+sprawdzający kontrakt:
+
+```bash
+python test_inference_personalization.py
+```
+
+Testuje m.in.:
+
+- personalizację (silny vs słaby user dostają różne RIR przy tym samym secie)
+- monotoniczność (rosnący ciężar → spadający RIR)
+- efekt zmęczenia MPC
+- projekcje `1RM` przez anchor + ratio
+- replay historii w `predict_mpc(...)` wraz z recovery
+- dynamiczny update anchorów po sesji
+- cold start (brak anchorów → domyślne populacyjne)
+
+Dobry punkt startowy jak chcesz się upewnić, że integracja po Twojej stronie
+dobrze wpina się w `inference.py`.
+
 ## Minimalny przykład end-to-end
 
 ```python

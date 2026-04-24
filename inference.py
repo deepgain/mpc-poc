@@ -264,10 +264,11 @@ class DeepGainModel(nn.Module):
     def _broadcast_anchors(self, anchors, weight):
         if anchors is None:
             anchors = self.default_strength_anchors
-        if anchors.dim() == weight.dim() + 1:
-            return anchors.to(device=weight.device, dtype=weight.dtype)
-        view_shape = (1,) * weight.dim() + (NUM_STRENGTH_ANCHORS,)
-        return anchors.to(device=weight.device, dtype=weight.dtype).view(view_shape).expand(weight.shape + (NUM_STRENGTH_ANCHORS,))
+        anchors = anchors.to(device=weight.device, dtype=weight.dtype)
+        target_shape = weight.shape + (NUM_STRENGTH_ANCHORS,)
+        if anchors.shape == target_shape:
+            return anchors
+        return torch.broadcast_to(anchors, target_shape)
 
     def compute_strength_features(self, exercise_idx, weight, anchors=None):
         if self.strength_feature_dim <= 0:
