@@ -5,6 +5,11 @@ __pycache__/
 training_data.csv
 train_output.log
 chart_*.png
+!charts/**/chart_*.png
 .claude/
 *.pt
 !deepgain_model_muscle_ord.pt
+<<<<<<< HEAD
+=======
+!deepgain_model_best.pt
+>>>>>>> michal/variant2-1rm-anchors

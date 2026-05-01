@@ -704,6 +704,7 @@ class UserProfile:
     training_years: float
     training_level: str
     e1rm: Dict[str, float]
+    config_e1rm: Dict[str, float]
     rm_factor: float
     rir_bias: float
     daily_cv: float
@@ -727,6 +728,15 @@ class UserProfile:
             self.muscle_last_trained = {m: epoch for m in ALL_MUSCLES}
             self.muscle_last_severity = {m: "moderate" for m in ALL_MUSCLES}
             self.muscle_last_region = {m: "upper" for m in ALL_MUSCLES}
+
+
+def base_lift_1rm_columns(user: UserProfile) -> Dict[str, float]:
+    """Expose user-config baseline 1RMs in the flat dataset schema."""
+    return {
+        "config_1rm_bench_press": round(float(user.config_e1rm.get("bench_press", 0.0)), 1),
+        "config_1rm_squat": round(float(user.config_e1rm.get("squat", 0.0)), 1),
+        "config_1rm_deadlift": round(float(user.config_e1rm.get("deadlift", 0.0)), 1),
+    }
 
 
 def generate_user(rng: np.random.Generator, user_id: str) -> UserProfile:
@@ -829,6 +839,11 @@ def generate_user(rng: np.random.Generator, user_id: str) -> UserProfile:
     return UserProfile(
         user_id=user_id, sex=sex, age=age, bodyweight_kg=bw,
         training_years=experience, training_level=level, e1rm=e1rm,
+        config_e1rm={
+            "bench_press": float(e1rm["bench_press"]),
+            "squat": float(e1rm["squat"]),
+            "deadlift": float(e1rm["deadlift"]),
+        },
         rm_factor=float(np.clip(rng.normal(1.0, 0.10), 0.75, 1.30)),
         rir_bias=float(rng.normal(0, 0.25)),
         daily_cv=float(np.clip(rng.normal(0.035, 0.008), 0.015, 0.060)),
@@ -1101,6 +1116,7 @@ def generate_warmup_sets(rng: np.random.Generator, user: UserProfile,
             "reps": int(reps),
             "rir": warm_rir,
             "timestamp": t.isoformat(),
+            **base_lift_1rm_columns(user),
         })
         t += timedelta(seconds=rng.uniform(60, 100))  # 60-100s rest [44]
 
@@ -1188,6 +1204,7 @@ def simulate_set(rng: np.random.Generator, user: UserProfile,
         "reps": actual_reps,
         "rir": reported_rir,
         "timestamp": timestamp.isoformat(),
+        **base_lift_1rm_columns(user),
     }
 
 
@@ -1524,7 +1541,14 @@ def generate_dataset(
 
     df = pd.DataFrame(all_rows)
     if len(df) == 0:
+<<<<<<< HEAD
         empty = pd.DataFrame(columns=["user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"])
+=======
+        empty = pd.DataFrame(columns=[
+            "user_id", "exercise", "weight_kg", "reps", "rir", "timestamp",
+            "config_1rm_bench_press", "config_1rm_squat", "config_1rm_deadlift",
+        ])
+>>>>>>> michal/variant2-1rm-anchors
         return empty, empty
 
     df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
@@ -2262,8 +2286,14 @@ def main():
         print("ERROR: No data generated!")
         sys.exit(1)
 
+<<<<<<< HEAD
     expected = {"user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"}
     assert set(train_df.columns) == expected, f"Bad columns: {set(train_df.columns)}"
+=======
+    required = {"user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"}
+    missing = required - set(train_df.columns)
+    assert not missing, f"Missing required columns: {missing}"
+>>>>>>> michal/variant2-1rm-anchors
 
     df_all = pd.concat([train_df, val_df]).sort_values(["user_id", "timestamp"])
 
