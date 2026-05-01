@@ -64,11 +64,10 @@ WEIGHT_SCALE = 200.0
 REPS_SCALE   = 30.0
 RIR_SCALE    = 5.0
 DT_SCALE     = np.log1p(168.0)
-<<<<<<< HEAD
-=======
+
 NUM_STRENGTH_ANCHORS = len(ANCHOR_NAMES)
 FULL_STRENGTH_FEATURE_DIM = NUM_STRENGTH_ANCHORS + 3
->>>>>>> michal/variant2-1rm-anchors
+
 
 # ─── Muscles (15 groups — matches train.py exactly) ─────────────────────────
 ALL_MUSCLES = [
@@ -235,18 +234,12 @@ class DeepGainModel(nn.Module):
     def __init__(self, num_exercises, num_muscles, embed_dim, hidden_dim, strength_feature_dim=0):
         super().__init__()
         self.num_muscles    = num_muscles
-<<<<<<< HEAD
-        self.exercise_embed = nn.Embedding(num_exercises, embed_dim)
-        self.muscle_embed   = nn.Embedding(num_muscles, embed_dim)
-        self.f_net = FatigueNet(embed_dim, hidden_dim)
-        self.g_net = RIRNet(embed_dim, hidden_dim, num_muscles)
-=======
+
         self.strength_feature_dim = strength_feature_dim
         self.exercise_embed = nn.Embedding(num_exercises, embed_dim)
         self.muscle_embed   = nn.Embedding(num_muscles, embed_dim)
         self.f_net = FatigueNet(embed_dim, hidden_dim, strength_feature_dim)
         self.g_net = RIRNet(embed_dim, hidden_dim, num_muscles, strength_feature_dim)
->>>>>>> michal/variant2-1rm-anchors
         self.r     = ExponentialRecovery(num_muscles)
         self.register_buffer(
             "involvement",
@@ -328,10 +321,7 @@ def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
     state = ckpt.get("model_state_dict", ckpt)
     embed_dim  = state["exercise_embed.weight"].shape[1]
     hidden_dim = state["f_net.net.0.weight"].shape[0]
-<<<<<<< HEAD
-    model = DeepGainModel(NUM_EXERCISES, NUM_MUSCLES, embed_dim, hidden_dim)
-    model.load_state_dict(state)
-=======
+
     g_in_dim = state["g_net.net.0.weight"].shape[1]
     strength_feature_dim = max(0, g_in_dim - (2 + embed_dim + NUM_MUSCLES))
     model = DeepGainModel(
@@ -342,7 +332,7 @@ def load_model(checkpoint_path: str, device=None) -> DeepGainModel:
         strength_feature_dim=strength_feature_dim,
     )
     model.load_state_dict(state, strict=False)
->>>>>>> michal/variant2-1rm-anchors
+
     model = model.to(device)
     model.eval()
     # Attach per-exercise weight normalization ranges (saved since M5).
@@ -396,14 +386,13 @@ def predict_mpc(
     """
     device    = next(model.parameters()).device
     ts_query  = _parse_timestamp(timestamp)
-<<<<<<< HEAD
-=======
+
     anchors_kg = resolve_anchor_values(
         anchor_values=strength_anchors,
         records=user_history,
         defaults=(model.default_strength_anchors.detach().cpu().numpy() * WEIGHT_SCALE),
     )
->>>>>>> michal/variant2-1rm-anchors
+
 
     # Filter to known exercises at or before the query timestamp, sort by time
     valid = []
@@ -420,11 +409,7 @@ def predict_mpc(
             "reps_raw":  int(entry["reps"]),
             "rir_raw":   float(entry["rir"]),
             "exercise_idx": EXERCISE_TO_IDX[ex],
-<<<<<<< HEAD
-            "weight":    _normalize_weight(model, float(entry["weight_kg"]), EXERCISE_TO_IDX[ex]),
-=======
             "weight":    float(entry["weight_kg"]) / WEIGHT_SCALE,
->>>>>>> michal/variant2-1rm-anchors
             "reps":      float(entry["reps"]) / REPS_SCALE,
             "rir":       float(entry["rir"])  / RIR_SCALE,
             "timestamp": ts,
@@ -458,11 +443,8 @@ def predict_mpc(
         mpc      = torch.ones(1, M, device=device)     # (1, M)
         prev_ts  = valid[0]["timestamp"]
 
-<<<<<<< HEAD
-        for i, s in enumerate(valid):
-=======
+
         for i, (s, anchors_step_kg) in enumerate(zip(valid, anchor_history_kg)):
->>>>>>> michal/variant2-1rm-anchors
             # Recovery since previous set
             if i > 0:
                 dt_h = (s["timestamp"] - prev_ts).total_seconds() / 3600.0
@@ -473,20 +455,7 @@ def predict_mpc(
                     mpc = model.r(mpc.reshape(-1), dt_norm, all_m_idx).reshape(1, M)
 
             # Fatigue from this set
-<<<<<<< HEAD
-            ei    = torch.tensor([s["exercise_idx"]], dtype=torch.long, device=device)
-            e_emb = model.exercise_embed(ei)                                   # (1, E)
-            inv   = model.involvement[ei]                                      # (1, M)
 
-            e_emb_exp = e_emb.unsqueeze(1).expand(-1, M, -1).reshape(-1, E)   # (M, E)
-            w_exp     = torch.full((M,), s["weight"], dtype=torch.float32, device=device)
-            r_exp     = torch.full((M,), s["reps"],   dtype=torch.float32, device=device)
-            rir_exp   = torch.full((M,), s["rir"],    dtype=torch.float32, device=device)
-            mpc_flat  = mpc.reshape(-1)                                        # (M,)
-            m_emb_flat = all_m_embed.reshape(-1, E)                            # (M, E)
-
-            drop = model.f_net(w_exp, r_exp, rir_exp, mpc_flat, e_emb_exp, m_emb_flat)
-=======
             anchors_t = torch.tensor([anchors_step_kg / WEIGHT_SCALE], dtype=torch.float32, device=device)
             ei    = torch.tensor([s["exercise_idx"]], dtype=torch.long, device=device)
             inv   = model.involvement[ei]                                      # (1, M)
@@ -505,7 +474,6 @@ def predict_mpc(
                 m_emb_flat,
                 anchors_t,
             )
->>>>>>> michal/variant2-1rm-anchors
             mpc  = (mpc * (1.0 - inv * drop.reshape(1, M))).clamp(min=0.1)
 
             prev_ts = s["timestamp"]
@@ -562,10 +530,7 @@ def predict_rir(
     device  = next(model.parameters()).device
     mpc_vals = [state.get(m, 1.0) for m in ALL_MUSCLES]
     mpc_t    = torch.tensor([mpc_vals], dtype=torch.float32, device=device)
-<<<<<<< HEAD
-    w_t      = torch.tensor(
-        [_normalize_weight(model, weight, EXERCISE_TO_IDX[exercise])],
-=======
+
     anchors_kg = resolve_anchor_values(
         anchor_values=strength_anchors if strength_anchors is not None else state,
         defaults=(model.default_strength_anchors.detach().cpu().numpy() * WEIGHT_SCALE),
@@ -573,15 +538,11 @@ def predict_rir(
     anchors_t = torch.tensor(anchors_kg / WEIGHT_SCALE, dtype=torch.float32, device=device)
     w_t      = torch.tensor(
         [weight / WEIGHT_SCALE],
->>>>>>> michal/variant2-1rm-anchors
+
         dtype=torch.float32, device=device,
     )
     r_t  = torch.tensor([reps / REPS_SCALE], dtype=torch.float32, device=device)
     ei   = torch.tensor([EXERCISE_TO_IDX[exercise]], dtype=torch.long, device=device)
-<<<<<<< HEAD
-    e_emb = model.exercise_embed(ei)
-=======
->>>>>>> michal/variant2-1rm-anchors
 
     with torch.no_grad():
         rir_norm = model.predict_rir_norm(ei, w_t, r_t, mpc_t, anchors_t)
@@ -608,17 +569,6 @@ def get_exercises() -> list[str]:
     """Return all exercise IDs recognized by the current model."""
     return sorted(ALL_EXERCISES)
 
-<<<<<<< HEAD
-
-def _normalize_weight(model: "DeepGainModel", weight_kg: float, exercise_idx: int) -> float:
-    """Normalize weight using per-exercise p5/p95 if available, else global scale."""
-    if model.weight_p5 is not None:
-        p5  = float(model.weight_p5[exercise_idx])
-        p95 = float(model.weight_p95[exercise_idx])
-        return float(np.clip((weight_kg - p5) / max(p95 - p5, 1.0), 0.0, 1.0))
-    return weight_kg / WEIGHT_SCALE
-=======
->>>>>>> michal/variant2-1rm-anchors
 
 
 def _parse_timestamp(ts) -> datetime:

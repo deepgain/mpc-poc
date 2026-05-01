@@ -1541,14 +1541,11 @@ def generate_dataset(
 
     df = pd.DataFrame(all_rows)
     if len(df) == 0:
-<<<<<<< HEAD
-        empty = pd.DataFrame(columns=["user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"])
-=======
+
         empty = pd.DataFrame(columns=[
             "user_id", "exercise", "weight_kg", "reps", "rir", "timestamp",
             "config_1rm_bench_press", "config_1rm_squat", "config_1rm_deadlift",
         ])
->>>>>>> michal/variant2-1rm-anchors
         return empty, empty
 
     df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
@@ -2286,14 +2283,9 @@ def main():
         print("ERROR: No data generated!")
         sys.exit(1)
 
-<<<<<<< HEAD
-    expected = {"user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"}
-    assert set(train_df.columns) == expected, f"Bad columns: {set(train_df.columns)}"
-=======
     required = {"user_id", "exercise", "weight_kg", "reps", "rir", "timestamp"}
     missing = required - set(train_df.columns)
     assert not missing, f"Missing required columns: {missing}"
->>>>>>> michal/variant2-1rm-anchors
 
     df_all = pd.concat([train_df, val_df]).sort_values(["user_id", "timestamp"])
 

@@ -9,7 +9,4 @@ chart_*.png
 .claude/
 *.pt
 !deepgain_model_muscle_ord.pt
-<<<<<<< HEAD
-=======
 !deepgain_model_best.pt
->>>>>>> michal/variant2-1rm-anchors
