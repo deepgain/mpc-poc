@@ -4,7 +4,9 @@ Runs train.py with tau unfrozen. All other settings identical.
 Model saved to deepgain_ablation_learned_tau*.pt.
 """
 
-with open("train.py") as f:
+import os
+_TRAIN_PY = os.path.join(os.path.dirname(__file__), "..", "train.py")
+with open(_TRAIN_PY) as f:
     code = f.read()
 
 # Unfreeze tau + add clamp

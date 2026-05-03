@@ -4,7 +4,9 @@ Runs train.py with ordering penalty disabled. All other settings identical.
 Same charts, same metrics output. Model saved to deepgain_ablation_no_ord*.pt.
 """
 
-with open("train.py") as f:
+import os
+_TRAIN_PY = os.path.join(os.path.dirname(__file__), "..", "train.py")
+with open(_TRAIN_PY) as f:
     code = f.read()
 
 # Disable ordering penalty

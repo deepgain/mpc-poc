@@ -4,7 +4,9 @@ Runs train.py with reduced capacity. All other settings identical (penalties, da
 Model saved to deepgain_ablation_small*.pt.
 """
 
-with open("train.py") as f:
+import os
+_TRAIN_PY = os.path.join(os.path.dirname(__file__), "..", "train.py")
+with open(_TRAIN_PY) as f:
     code = f.read()
 
 # Smaller architecture
