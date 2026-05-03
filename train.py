@@ -17,7 +17,6 @@ import warnings
 import time
 from datetime import datetime
 warnings.filterwarnings("ignore")
-
 from strength_priors import (
     ANCHOR_COLUMNS,
     ANCHOR_NAMES,
@@ -40,7 +39,7 @@ print(f"Device: {DEVICE}")
 EMBED_DIM = 64
 HIDDEN_DIM = 512
 LR = 1e-3
-EPOCHS = 40
+EPOCHS = 100
 CHUNK_LEN = 512
 BATCH_SIZE = 16
 WEIGHT_SCALE = 200.0
@@ -190,50 +189,15 @@ def _load_split(path):
 
 print("Loading data...")
 # Per-user 70/30 split — preserves complete user sequences in val (no MPC state leakage).
-# Falls back to pre-split files if full CSV not available.
-_FULL_CSV_CANDIDATES = [
-    "training_data.csv",
-    "training_data_full_generated.csv",
-]
-_SPLIT_CANDIDATES = [
-    ("training_data_train.csv", "training_data_val.csv"),
-    ("generated_datasets/baseline_main/training_data_train.csv",
-     "generated_datasets/baseline_main/training_data_val.csv"),
-]
-
-_loaded_source = None
-for _candidate in _FULL_CSV_CANDIDATES:
-    if os.path.exists(_candidate):
-        df = _load_split(_candidate)
-        _loaded_source = _candidate
-        break
-
-if _loaded_source is not None:
-    user_ids = df["user_id"].unique()
-    rng = np.random.RandomState(42)
-    rng.shuffle(user_ids)
-    split = int(0.7 * len(user_ids))
-    train_df = df[df["user_id"].isin(set(user_ids[:split]))].copy()
-    test_df  = df[df["user_id"].isin(set(user_ids[split:]))].copy()
-    print(f"Loaded {_loaded_source}, per-user 70/30 split ({len(set(user_ids[:split]))} train / {len(set(user_ids[split:]))} val users)")
-else:
-    _loaded = False
-    for _train_path, _val_path in _SPLIT_CANDIDATES:
-        if os.path.exists(_train_path) and os.path.exists(_val_path):
-            train_df = _load_split(_train_path)
-            test_df  = _load_split(_val_path)
-            print(f"Loaded pre-split files: {_train_path}")
-            _loaded = True
-            break
-    if not _loaded:
-        df = _load_split("training_data.csv")
-        user_ids = df["user_id"].unique()
-        rng = np.random.RandomState(42)
-        rng.shuffle(user_ids)
-        split = int(0.7 * len(user_ids))
-        train_df = df[df["user_id"].isin(set(user_ids[:split]))].copy()
-        test_df  = df[df["user_id"].isin(set(user_ids[split:]))].copy()
-        print(f"Loaded training_data.csv, per-user 70/30 split")
+df = _load_split("training_data.csv")
+user_ids = df["user_id"].unique()
+rng = np.random.RandomState(42)
+rng.shuffle(user_ids)
+split = int(0.7 * len(user_ids))
+train_df = df[df["user_id"].isin(set(user_ids[:split]))].copy()
+test_df  = df[df["user_id"].isin(set(user_ids[split:]))].copy()
+print(f"Loaded training_data.csv, per-user 70/30 split "
+      f"({len(set(user_ids[:split]))} train / {len(set(user_ids[split:]))} val users)")
 
 print(f"Train: {len(train_df):,} sets from {train_df['user_id'].nunique()} users")
 print(f"Test:  {len(test_df):,} sets from {test_df['user_id'].nunique()} users")
@@ -1017,7 +981,7 @@ with open(os.path.join(CHART_DIR, "README.md"), "w") as _f:
     _f.write(f"| LR | {LR} |\n")
     _f.write(f"| BATCH_SIZE | {BATCH_SIZE} |\n")
     _f.write(f"| CHUNK_LEN | {CHUNK_LEN} |\n")
-    _f.write(f"| Dataset | {_loaded_source if _loaded_source is not None else 'pre-split'} |\n")
+    _f.write(f"| Dataset | training_data.csv |\n")
     _f.write(f"| Parameters | {sum(p.numel() for p in model.parameters()):,} |\n")
     _f.write(f"| Val RMSE (best) | {np.sqrt(best_val_loss) * RIR_SCALE:.4f} |\n")
     _f.write(f"| Test RMSE | {rmse:.4f} |\n")
