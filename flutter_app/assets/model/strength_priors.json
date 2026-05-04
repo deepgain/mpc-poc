@@ -1,0 +1,249 @@
+{
+  "anchor_names": [
+    "bench_press",
+    "squat",
+    "deadlift"
+  ],
+  "anchor_columns": {
+    "bench_press": "config_1rm_bench_press",
+    "squat": "config_1rm_squat",
+    "deadlift": "config_1rm_deadlift"
+  },
+  "anchor_aliases": {
+    "bench_press": [
+      "bench_press",
+      "bench_1rm",
+      "config_1rm_bench_press"
+    ],
+    "squat": [
+      "squat",
+      "squat_1rm",
+      "config_1rm_squat"
+    ],
+    "deadlift": [
+      "deadlift",
+      "deadlift_1rm",
+      "config_1rm_deadlift"
+    ]
+  },
+  "default_anchor_values_kg": {
+    "bench_press": 100.0,
+    "squat": 140.0,
+    "deadlift": 180.0
+  },
+  "exercise_priors": {
+    "bench_press": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 1.0,
+      "ratio_sd": 0.0,
+      "exercise_family": "bench_primary"
+    },
+    "incline_bench": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.815,
+      "ratio_sd": 0.02,
+      "exercise_family": "bench_variant"
+    },
+    "close_grip_bench": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.85,
+      "ratio_sd": 0.017,
+      "exercise_family": "bench_variant"
+    },
+    "spoto_press": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.9,
+      "ratio_sd": 0.023,
+      "exercise_family": "bench_variant"
+    },
+    "incline_bench_45": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.78,
+      "ratio_sd": 0.023,
+      "exercise_family": "bench_variant"
+    },
+    "decline_bench": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.9,
+      "ratio_sd": 0.023,
+      "exercise_family": "bench_variant"
+    },
+    "chest_press_machine": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.84,
+      "ratio_sd": 0.035,
+      "exercise_family": "machine_press"
+    },
+    "ohp": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.62,
+      "ratio_sd": 0.029,
+      "exercise_family": "vertical_press"
+    },
+    "dips": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.635,
+      "ratio_sd": 0.049,
+      "exercise_family": "press_assistance"
+    },
+    "dumbbell_flyes": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.29,
+      "ratio_sd": 0.029,
+      "exercise_family": "chest_isolation"
+    },
+    "pendlay_row": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.89,
+      "ratio_sd": 0.052,
+      "exercise_family": "upper_pull"
+    },
+    "seal_row": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.765,
+      "ratio_sd": 0.049,
+      "exercise_family": "upper_pull"
+    },
+    "lat_pulldown": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.68,
+      "ratio_sd": 0.046,
+      "exercise_family": "vertical_pull"
+    },
+    "pull_up": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.565,
+      "ratio_sd": 0.049,
+      "exercise_family": "vertical_pull"
+    },
+    "skull_crusher": {
+      "anchor_lift": "bench_press",
+      "ratio_mean": 0.295,
+      "ratio_sd": 0.032,
+      "exercise_family": "triceps_isolation"
+    },
+    "squat": {
+      "anchor_lift": "squat",
+      "ratio_mean": 1.0,
+      "ratio_sd": 0.0,
+      "exercise_family": "squat_primary"
+    },
+    "low_bar_squat": {
+      "anchor_lift": "squat",
+      "ratio_mean": 0.99,
+      "ratio_sd": 0.03,
+      "exercise_family": "squat_variant"
+    },
+    "high_bar_squat": {
+      "anchor_lift": "squat",
+      "ratio_mean": 0.96,
+      "ratio_sd": 0.03,
+      "exercise_family": "squat_variant"
+    },
+    "leg_press": {
+      "anchor_lift": "squat",
+      "ratio_mean": 1.45,
+      "ratio_sd": 0.087,
+      "exercise_family": "machine_lower_compound"
+    },
+    "bulgarian_split_squat": {
+      "anchor_lift": "squat",
+      "ratio_mean": 0.4,
+      "ratio_sd": 0.035,
+      "exercise_family": "unilateral_lower"
+    },
+    "leg_curl": {
+      "anchor_lift": "squat",
+      "ratio_mean": 0.34,
+      "ratio_sd": 0.035,
+      "exercise_family": "hamstring_isolation"
+    },
+    "leg_extension": {
+      "anchor_lift": "squat",
+      "ratio_mean": 0.42,
+      "ratio_sd": 0.046,
+      "exercise_family": "quad_isolation"
+    },
+    "deadlift": {
+      "anchor_lift": "deadlift",
+      "ratio_mean": 1.0,
+      "ratio_sd": 0.0,
+      "exercise_family": "hinge_primary"
+    },
+    "sumo_deadlift": {
+      "anchor_lift": "deadlift",
+      "ratio_mean": 0.975,
+      "ratio_sd": 0.05,
+      "exercise_family": "hinge_variant"
+    },
+    "rdl": {
+      "anchor_lift": "deadlift",
+      "ratio_mean": 0.7,
+      "ratio_sd": 0.029,
+      "exercise_family": "hinge_variant"
+    },
+    "reverse_fly": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.12,
+      "ratio_sd": 0.023,
+      "exercise_family": "rear_delt_isolation"
+    },
+    "plank": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.34,
+      "ratio_sd": 0.035,
+      "exercise_family": "core_bracing"
+    },
+    "farmers_walk": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.75,
+      "ratio_sd": 0.115,
+      "exercise_family": "carry"
+    },
+    "leg_raises": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.29,
+      "ratio_sd": 0.029,
+      "exercise_family": "core_flexion"
+    },
+    "ab_wheel": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.375,
+      "ratio_sd": 0.043,
+      "exercise_family": "core_anti_extension"
+    },
+    "dead_bug": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.25,
+      "ratio_sd": 0.029,
+      "exercise_family": "core_stability"
+    },
+    "trx_bodysaw": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.29,
+      "ratio_sd": 0.029,
+      "exercise_family": "core_anti_extension"
+    },
+    "suitcase_carry": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.44,
+      "ratio_sd": 0.081,
+      "exercise_family": "unilateral_carry"
+    },
+    "bird_dog": {
+      "anchor_lift": "bodyweight",
+      "ratio_mean": 0.25,
+      "ratio_sd": 0.029,
+      "exercise_family": "core_stability"
+    }
+  },
+  "constants": {
+    "DEFAULT_UPDATE_ALPHA": 0.15,
+    "DEFAULT_UPDATE_MAX_RELATIVE_CHANGE": 0.04,
+    "DEFAULT_UPDATE_MIN_RELATIVE_LOAD": 0.5,
+    "DEFAULT_UPDATE_MAX_REPS": 10,
+    "DEFAULT_UPDATE_MAX_RIR": 3,
+    "DEFAULT_UPDATE_TOP_K": 3,
+    "DEFAULT_SESSION_GAP_HOURS": 6.0
+  }
+}

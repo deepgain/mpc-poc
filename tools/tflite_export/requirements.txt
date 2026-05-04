@@ -1,0 +1,6 @@
+torch>=2.4
+numpy
+pyyaml
+pandas
+ai-edge-torch>=0.3.0
+tensorflow>=2.16

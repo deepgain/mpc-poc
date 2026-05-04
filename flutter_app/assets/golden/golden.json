@@ -1,0 +1,290 @@
+[
+  {
+    "name": "fresh_user_no_history",
+    "history": [],
+    "query_ts": "2026-05-01T10:00:00",
+    "anchors_kg": [
+      100.0,
+      140.0,
+      180.0
+    ],
+    "expected_mpc": {
+      "chest": 1.0,
+      "anterior_delts": 1.0,
+      "lateral_delts": 1.0,
+      "rear_delts": 1.0,
+      "rhomboids": 1.0,
+      "triceps": 1.0,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "rir_checks": [
+      {
+        "exercise": "bench_press",
+        "weight_kg": 80.0,
+        "reps": 5,
+        "expected_rir": 4.542803764343262
+      },
+      {
+        "exercise": "squat",
+        "weight_kg": 100.0,
+        "reps": 5,
+        "expected_rir": 4.486700594425201
+      }
+    ]
+  },
+  {
+    "name": "single_set_then_24h_recovery",
+    "history": [
+      {
+        "exercise": "bench_press",
+        "weight_kg": 100.0,
+        "reps": 5,
+        "rir": 1,
+        "timestamp": "2026-05-01T10:00:00"
+      }
+    ],
+    "query_ts": "2026-05-02T10:00:00",
+    "anchors_kg": [
+      100.0,
+      140.0,
+      180.0
+    ],
+    "expected_mpc": {
+      "chest": 0.8960902690887451,
+      "anterior_delts": 0.9982710480690002,
+      "lateral_delts": 0.9997981786727905,
+      "rear_delts": 0.9999497532844543,
+      "rhomboids": 1.0,
+      "triceps": 0.9887697696685791,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "rir_checks": [
+      {
+        "exercise": "bench_press",
+        "weight_kg": 95.0,
+        "reps": 6,
+        "expected_rir": 4.5405712723731995
+      }
+    ]
+  },
+  {
+    "name": "push_session_6_sets",
+    "history": [
+      {
+        "exercise": "bench_press",
+        "weight_kg": 100.0,
+        "reps": 5,
+        "rir": 1,
+        "timestamp": "2026-05-01T09:00:00"
+      },
+      {
+        "exercise": "bench_press",
+        "weight_kg": 100.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-05-01T09:03:00"
+      },
+      {
+        "exercise": "bench_press",
+        "weight_kg": 95.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-05-01T09:06:00"
+      },
+      {
+        "exercise": "ohp",
+        "weight_kg": 60.0,
+        "reps": 6,
+        "rir": 2,
+        "timestamp": "2026-05-01T09:12:00"
+      },
+      {
+        "exercise": "ohp",
+        "weight_kg": 60.0,
+        "reps": 6,
+        "rir": 3,
+        "timestamp": "2026-05-01T09:15:00"
+      },
+      {
+        "exercise": "close_grip_bench",
+        "weight_kg": 80.0,
+        "reps": 8,
+        "rir": 2,
+        "timestamp": "2026-05-01T09:22:00"
+      }
+    ],
+    "query_ts": "2026-05-01T09:30:00",
+    "anchors_kg": [
+      100.0,
+      140.0,
+      180.0
+    ],
+    "expected_mpc": {
+      "chest": 0.23990362882614136,
+      "anterior_delts": 0.695217490196228,
+      "lateral_delts": 0.9144098162651062,
+      "rear_delts": 0.986078679561615,
+      "rhomboids": 1.0,
+      "triceps": 0.6657977104187012,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "rir_checks": [
+      {
+        "exercise": "bench_press",
+        "weight_kg": 80.0,
+        "reps": 5,
+        "expected_rir": 1.2180107831954956
+      },
+      {
+        "exercise": "squat",
+        "weight_kg": 120.0,
+        "reps": 5,
+        "expected_rir": 4.543844759464264
+      },
+      {
+        "exercise": "lat_pulldown",
+        "weight_kg": 70.0,
+        "reps": 8,
+        "expected_rir": 1.6395604610443115
+      }
+    ]
+  },
+  {
+    "name": "leg_session_then_72h_recovery",
+    "history": [
+      {
+        "exercise": "squat",
+        "weight_kg": 120.0,
+        "reps": 5,
+        "rir": 1,
+        "timestamp": "2026-05-01T09:00:00"
+      },
+      {
+        "exercise": "squat",
+        "weight_kg": 120.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-05-01T09:04:00"
+      },
+      {
+        "exercise": "rdl",
+        "weight_kg": 100.0,
+        "reps": 6,
+        "rir": 2,
+        "timestamp": "2026-05-01T09:10:00"
+      },
+      {
+        "exercise": "leg_extension",
+        "weight_kg": 60.0,
+        "reps": 12,
+        "rir": 2,
+        "timestamp": "2026-05-01T09:18:00"
+      }
+    ],
+    "query_ts": "2026-05-04T09:00:00",
+    "anchors_kg": [
+      100.0,
+      140.0,
+      200.0
+    ],
+    "expected_mpc": {
+      "chest": 1.0,
+      "anterior_delts": 1.0,
+      "lateral_delts": 1.0,
+      "rear_delts": 1.0,
+      "rhomboids": 1.0,
+      "triceps": 1.0,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 0.9794510006904602,
+      "hamstrings": 0.9958564043045044,
+      "glutes": 0.9995086193084717,
+      "adductors": 1.0,
+      "erectors": 0.9996645450592041,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "rir_checks": [
+      {
+        "exercise": "squat",
+        "weight_kg": 100.0,
+        "reps": 5,
+        "expected_rir": 4.4875165820121765
+      }
+    ]
+  },
+  {
+    "name": "unknown_exercise_in_history_silently_skipped",
+    "history": [
+      {
+        "exercise": "bench_press",
+        "weight_kg": 80.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-05-01T10:00:00"
+      },
+      {
+        "exercise": "made_up_movement",
+        "weight_kg": 80.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-05-01T10:05:00"
+      },
+      {
+        "exercise": "ohp",
+        "weight_kg": 50.0,
+        "reps": 6,
+        "rir": 3,
+        "timestamp": "2026-05-01T10:15:00"
+      }
+    ],
+    "query_ts": "2026-05-01T11:00:00",
+    "anchors_kg": [
+      100.0,
+      140.0,
+      180.0
+    ],
+    "expected_mpc": {
+      "chest": 0.6058312654495239,
+      "anterior_delts": 0.8151161670684814,
+      "lateral_delts": 0.977074146270752,
+      "rear_delts": 0.9951390027999878,
+      "rhomboids": 1.0,
+      "triceps": 0.9006895422935486,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "rir_checks": []
+  }
+]

@@ -1,0 +1,694 @@
+{
+  "anchor_names": [
+    "bench_press",
+    "squat",
+    "deadlift"
+  ],
+  "default_anchors_kg": [
+    100.0,
+    140.0,
+    180.0
+  ],
+  "coerce": [
+    {
+      "name": "null \u2192 defaults",
+      "input": null,
+      "expected": [
+        100.0,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "full dict",
+      "input": {
+        "bench_press": 110.0,
+        "squat": 150.0,
+        "deadlift": 200.0
+      },
+      "expected": [
+        110.0,
+        150.0,
+        200.0
+      ]
+    },
+    {
+      "name": "partial dict (only bench)",
+      "input": {
+        "bench_press": 110.0
+      },
+      "expected": [
+        110.0,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "config_1rm_ aliases",
+      "input": {
+        "config_1rm_bench_press": 95.0,
+        "config_1rm_squat": 130.0
+      },
+      "expected": [
+        95.0,
+        130.0,
+        180.0
+      ]
+    },
+    {
+      "name": "list [bench, squat, deadlift]",
+      "input": [
+        120.0,
+        160.0,
+        220.0
+      ],
+      "expected": [
+        120.0,
+        160.0,
+        220.0
+      ]
+    },
+    {
+      "name": "list with zero/negative entries falls back to defaults",
+      "input": [
+        -5.0,
+        0.0,
+        220.0
+      ],
+      "expected": [
+        100.0,
+        140.0,
+        220.0
+      ]
+    },
+    {
+      "name": "unknown alias ignored",
+      "input": {
+        "squat": 150.0,
+        "unknown_lift": 999.0
+      },
+      "expected": [
+        100.0,
+        150.0,
+        180.0
+      ]
+    }
+  ],
+  "project": [
+    {
+      "exercise": "bench_press",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": 100.0
+    },
+    {
+      "exercise": "squat",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": 140.0
+    },
+    {
+      "exercise": "deadlift",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": 180.0
+    },
+    {
+      "exercise": "incline_bench",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": 81.5
+    },
+    {
+      "exercise": "rdl",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": 126.0
+    },
+    {
+      "exercise": "leg_press",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": 203.0
+    },
+    {
+      "exercise": "ohp",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": 62.0
+    },
+    {
+      "exercise": "pull_up",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": 56.5
+    },
+    {
+      "exercise": "reverse_fly",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": null
+    },
+    {
+      "exercise": "made_up_exercise",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": null
+    },
+    {
+      "exercise": "plank",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "expected": null
+    }
+  ],
+  "e1rm": [
+    {
+      "weight_kg": 100.0,
+      "reps": 5,
+      "rir": 2.0,
+      "expected": 123.33333333333334
+    },
+    {
+      "weight_kg": 60.0,
+      "reps": 10,
+      "rir": 0.0,
+      "expected": 80.0
+    },
+    {
+      "weight_kg": 140.0,
+      "reps": 1,
+      "rir": 0.0,
+      "expected": 144.66666666666669
+    },
+    {
+      "weight_kg": 80.0,
+      "reps": 8,
+      "rir": 3.0,
+      "expected": 109.33333333333334
+    },
+    {
+      "weight_kg": 0.0,
+      "reps": 5,
+      "rir": 2.0,
+      "expected": null
+    },
+    {
+      "weight_kg": 100.0,
+      "reps": -1,
+      "rir": 2.0,
+      "expected": null
+    }
+  ],
+  "update": [
+    {
+      "name": "no candidates \u2192 unchanged",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [],
+      "expected_new_anchors": [
+        100.0,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "light single set below min_relative_load \u2192 unchanged",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 30.0,
+          "reps": 3,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:00:00"
+        }
+      ],
+      "expected_new_anchors": [
+        100.0,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "clean PR-quality bench triple",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 110.0,
+          "reps": 3,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:00:00"
+        }
+      ],
+      "expected_new_anchors": [
+        103.69999694824219,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "multi-set bench session, top-K weighted average",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-01T09:00:00"
+        },
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-01T09:03:00"
+        },
+        {
+          "exercise": "bench_press",
+          "weight_kg": 95.0,
+          "reps": 6,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:06:00"
+        },
+        {
+          "exercise": "close_grip_bench",
+          "weight_kg": 90.0,
+          "reps": 5,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:12:00"
+        }
+      ],
+      "expected_new_anchors": [
+        103.6969223022461,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "squat session updates squat anchor only",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "squat",
+          "weight_kg": 150.0,
+          "reps": 5,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:00:00"
+        },
+        {
+          "exercise": "squat",
+          "weight_kg": 150.0,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-01T09:04:00"
+        },
+        {
+          "exercise": "low_bar_squat",
+          "weight_kg": 145.0,
+          "reps": 5,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:10:00"
+        }
+      ],
+      "expected_new_anchors": [
+        100.0,
+        145.60000610351562,
+        180.0
+      ]
+    },
+    {
+      "name": "clip to \u00b14% \u2014 extreme jump capped",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 200.0,
+          "reps": 1,
+          "rir": 0,
+          "timestamp": "2026-05-01T09:00:00"
+        }
+      ],
+      "expected_new_anchors": [
+        104.0,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "rir > max_rir filtered out",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 80.0,
+          "reps": 5,
+          "rir": 5,
+          "timestamp": "2026-05-01T09:00:00"
+        }
+      ],
+      "expected_new_anchors": [
+        100.0,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "reps > max_reps filtered out",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 80.0,
+          "reps": 15,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:00:00"
+        }
+      ],
+      "expected_new_anchors": [
+        100.0,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "multi-anchor mixed session",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-01T09:00:00"
+        },
+        {
+          "exercise": "squat",
+          "weight_kg": 140.0,
+          "reps": 5,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:08:00"
+        },
+        {
+          "exercise": "deadlift",
+          "weight_kg": 180.0,
+          "reps": 3,
+          "rir": 0,
+          "timestamp": "2026-05-01T09:18:00"
+        }
+      ],
+      "expected_new_anchors": [
+        103.5,
+        144.1999969482422,
+        182.6999969482422
+      ]
+    }
+  ],
+  "history": [
+    {
+      "name": "empty history",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [],
+      "expected_history": [],
+      "expected_final": [
+        100.0,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "single session, single set",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-01T09:00:00"
+        }
+      ],
+      "expected_history": [
+        [
+          100.0,
+          140.0,
+          180.0
+        ]
+      ],
+      "expected_final": [
+        103.5,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "single session, 3 sets \u2014 anchors stable mid-session",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-01T09:00:00"
+        },
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-01T09:03:00"
+        },
+        {
+          "exercise": "bench_press",
+          "weight_kg": 95.0,
+          "reps": 6,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:06:00"
+        }
+      ],
+      "expected_history": [
+        [
+          100.0,
+          140.0,
+          180.0
+        ],
+        [
+          100.0,
+          140.0,
+          180.0
+        ],
+        [
+          100.0,
+          140.0,
+          180.0
+        ]
+      ],
+      "expected_final": [
+        103.1925277709961,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "two sessions across 24h gap \u2014 anchor advances",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:00:00"
+        },
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-01T09:03:00"
+        },
+        {
+          "exercise": "bench_press",
+          "weight_kg": 102.5,
+          "reps": 5,
+          "rir": 2,
+          "timestamp": "2026-05-03T09:00:00"
+        },
+        {
+          "exercise": "bench_press",
+          "weight_kg": 102.5,
+          "reps": 5,
+          "rir": 1,
+          "timestamp": "2026-05-03T09:03:00"
+        }
+      ],
+      "expected_history": [
+        [
+          100.0,
+          140.0,
+          180.0
+        ],
+        [
+          100.0,
+          140.0,
+          180.0
+        ],
+        [
+          103.23943328857422,
+          140.0,
+          180.0
+        ],
+        [
+          103.23943328857422,
+          140.0,
+          180.0
+        ]
+      ],
+      "expected_final": [
+        106.4488525390625,
+        140.0,
+        180.0
+      ]
+    },
+    {
+      "name": "three sessions, mixed lifts",
+      "anchors_kg": {
+        "bench_press": 100.0,
+        "squat": 140.0,
+        "deadlift": 180.0
+      },
+      "completed_sets": [
+        {
+          "exercise": "bench_press",
+          "weight_kg": 100.0,
+          "reps": 5,
+          "rir": 1,
+          "timestamp": "2026-05-01T09:00:00"
+        },
+        {
+          "exercise": "squat",
+          "weight_kg": 140.0,
+          "reps": 5,
+          "rir": 1,
+          "timestamp": "2026-05-02T09:00:00"
+        },
+        {
+          "exercise": "deadlift",
+          "weight_kg": 180.0,
+          "reps": 3,
+          "rir": 0,
+          "timestamp": "2026-05-03T09:00:00"
+        }
+      ],
+      "expected_history": [
+        [
+          100.0,
+          140.0,
+          180.0
+        ],
+        [
+          103.0,
+          140.0,
+          180.0
+        ],
+        [
+          103.0,
+          144.1999969482422,
+          180.0
+        ]
+      ],
+      "expected_final": [
+        103.0,
+        144.1999969482422,
+        182.6999969482422
+      ]
+    }
+  ]
+}
