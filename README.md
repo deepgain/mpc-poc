@@ -1,77 +1,87 @@
-# mpc-poc
+# DeepGain — mpc-poc
 
-Proof-of-concept implementation of **Muscle Performance Capacity (MPC)** estimation from minimal training logs (weight, reps, RIR).
+Proof-of-concept implementacja estymacji **Muscle Performance Capacity (MPC)** z logów treningowych (weight, reps, RIR).
 
-MPC is a latent per-muscle fatigue state in [0, 1] — never directly observed, inferred purely from RIR prediction error across overlapping exercises.
+MPC to ukryty stan zmęczenia per mięsień w [0, 1] — nigdy bezpośrednio nieobserwowany, wnioskowany wyłącznie z błędu predykcji RIR.
 
-## Why RIR over RPE
+---
 
-RIR (Repetitions in Reserve, 0–5 integer) replaces RPE (6–10) because:
-- Maps directly to proximity-to-failure — the mechanistically relevant variable (Robinson 2024)
-- Higher accuracy near failure: ±0.65 reps at RIR 1 (Refalo 2024) vs RPE's ordinal ambiguity
-- No dead zone — every value 0–5 is used, unlike RPE where 6.0 is rarely reported
-- Exercise-agnostic — RIR 2 means the same thing on squats and lateral raises
+## Struktura repo
 
-## POC Results
+```
+mpc-poc/
+├── models/          # Model ML — trening, inference, checkpointy (Michal)
+├── dataset/         # Generator danych, YAML ćwiczeń, wagi EMG (Aleksander)
+├── app/             # Algorytm planowania treningu (Miłosz)
+└── exercise_selection_algorithm/
+```
 
-Trained on ~550K synthetic sets (200 users × 52 weeks, 27 exercises, 16 muscle groups).
-Data generated with **no hidden fatigue state** — pure empirical lookup tables from 57 papers.
+---
 
-| Metric | Value |
-|--------|-------|
-| RMSE | 0.98 RIR |
-| MAE | 0.76 RIR |
-| Correlation | 0.83 |
+## Wyniki (aktualny model — Wariant 2, 100 epok)
 
-70/30 train/test split by user (no data leakage).
+Trenowany na 1.54M syntetycznych setów (320 userów, 34 ćwiczenia, 15 grup mięśniowych).
 
-## Architecture
+| Metryka | Wartość |
+|---------|---------|
+| Val RMSE | **0.841 RIR** |
+| Test MAE | **0.658 RIR** |
+| Pearson R | **0.882** |
+| Ordering accuracy | **92%** |
 
-Three learned neural network components:
+Model rozróżnia siłę użytkowników przez 3 anchory 1RM (bench/squat/deadlift).
 
-- **f** (fatigue): `MPC_m' = f(w, r, RIR, MPC_m, exercise_embed, muscle_embed)` — how much each muscle's capacity drops after a set
-- **g** (RIR predictor): `RIR = g(w, r, exercise_embed, all_MPC)` — predicted RIR from current MPC state of all 16 muscles
-- **r** (recovery): `MPC_m' = r(MPC_m, delta_t, muscle_embed)` — how MPC recovers toward 1.0 over time
+---
 
-All three share weights across exercises/muscles via learned embeddings (16-dim). The involvement matrix (which muscles each exercise uses) is fixed from EMG literature.
+## Architektura
 
-Training signal: RIR prediction error only. Backprop flows through the full sequential chain: loss -> g -> MPC -> f -> previous MPC -> ...
+```
+DeepGainModel
+├── f_net  — FatigueNet (MLP): ile MPC spada per mięsień po secie
+├── g_net  — RIRNet (MLP):    ile RIR przy danym stanie mięśni i sile usera
+└── r      — ExponentialRecovery: MPC_new = 1 - (1-MPC)·exp(-dt/τ)
+```
 
-See [DeepGain_specification.md](DeepGain_specification.md) for the full specification.
+Szczegóły architektury, metryki, historia modeli → [`models/README.md`](models/README.md)
 
-## Files
+---
 
-| File | Description |
-|------|-------------|
-| `generate_training_data.py` | MPC-free synthetic data generator (57 citations, 5 empirical lookup tables, NO hidden state) |
-| `train.py` | Training script (50 epochs, ~25 min on CPU) |
-| `explore_model.ipynb` | Notebook: load pretrained model, run all visualizations |
-| `deepgain_model.pt` | Pretrained model weights (88K) |
-| `DeepGain_specification.md` | Full MPC specification |
+## Inference API
+
+```python
+from models.inference import load_model, predict_mpc, predict_rir, update_strength_anchors
+
+model   = load_model("models/deepgain_model_best.pt")
+anchors = {"bench_press": 100.0, "squat": 140.0, "deadlift": 180.0}
+
+mpc = predict_mpc(model, user_history, timestamp, strength_anchors=anchors)
+rir = predict_rir(model, mpc, "bench_press", 80.0, 5, strength_anchors=anchors)
+anchors = update_strength_anchors(anchors, completed_sets)
+```
+
+Pełna dokumentacja API → [`models/README_INFERENCE.md`](models/README_INFERENCE.md)
+
+---
 
 ## Quick Start
 
 ```bash
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r models/requirements.txt
 
-# Generate training data (200 users × 52 weeks, ~30MB CSV)
-python generate_training_data.py
+# Generowanie danych treningowych
+cd dataset && python generate_training_data.py
 
-# Train the model (~25 min on CPU)
-python train.py
+# Trening modelu
+cd models && python train.py
 
-# Or skip training and use the pretrained model in the notebook
-jupyter notebook explore_model.ipynb
+# Smoke test inference
+cd models && python test_inference_personalization.py
 ```
 
-## Key Design Decisions
+---
 
-- **MPC-free data generator** — simulator uses only empirical lookup tables (retention ratios, cross-exercise transfer, recovery curves), NO hidden fatigue state. MPC must be *discovered* by the model, not reverse-engineered from the simulator.
-- **RIR scale (0–5 integer)** — directly measures proximity to failure, supported by Robinson 2024, Halperin 2022, Refalo 2024
-- **User-level train/test split** — full workout sequences stay intact, no data leakage
-- **Teacher forcing** — f receives ground-truth RIR during training to prevent MPC state corruption
-- **Fixed involvement matrix** — exercise-muscle coefficients from EMG literature, not learned
-- **Multiplicative MPC update** — `new_mpc = mpc * (1 - involvement * drop)`, naturally bounded
-- **Sequence chunking** (256 steps) — limits BPTT while carrying MPC state between chunks
+## Specyfikacja
+
+Pełna specyfikacja MPC → [`DeepGain_specification.md`](DeepGain_specification.md)

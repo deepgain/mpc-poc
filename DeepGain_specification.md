@@ -32,6 +32,11 @@ One row = one set performed by any user.
 | `reps` | int | Repetitions performed |
 | `rir` | int | Repetitions in Reserve (0–5) |
 | `timestamp` | datetime | When the set was performed |
+| `config_1rm_bench_press` | float | User's bench press 1RM at onboarding (kg) |
+| `config_1rm_squat` | float | User's squat 1RM at onboarding (kg) |
+| `config_1rm_deadlift` | float | User's deadlift 1RM at onboarding (kg) |
+
+The three `config_1rm_*` columns are collected once at onboarding and serve as **strength anchors** — they allow the model to distinguish users of different strength levels. From these three values, a 1RM for any of the 34 supported exercises is projected using a ratio prior table (e.g. `ohp_1rm = bench_1rm × 0.62`). These anchors update dynamically after each session based on observed performance.
 
 RIR (Repetitions in Reserve) is used instead of RPE because it maps directly to proximity-to-failure — the mechanistically relevant variable for fatigue. RIR 0 = failure, RIR 1 = one rep left, etc. Integer scale 0–5 covers all productive training (Robinson 2024, Halperin 2022).
 
@@ -57,9 +62,15 @@ $$\mathcal{L}_{f\text{-order}} = \frac{1}{|\text{pairs}|} \sum_{(a,b): I_a > I_b
 
 ### $g_e$ — RIR prediction (per exercise $e$) — Neural Network
 
-$$\widehat{RIR} = g_e(w, r, MPC_{m_1}, MPC_{m_2}, \dots)$$
+$$\widehat{RIR} = g_e(w, r, \mathbf{s}, MPC_{m_1}, MPC_{m_2}, \dots)$$
 
 Predicts how many reps remain in reserve given current state of **all muscles involved** in exercise $e$. Bench press RIR depends on MPC of chest, triceps, and anterior delts simultaneously.
+
+$\mathbf{s}$ is the **strength feature vector** (6-dim) derived from the user's 1RM anchors:
+
+$$\mathbf{s} = [\text{bench}_{1RM},\ \text{squat}_{1RM},\ \text{deadlift}_{1RM},\ \text{projected}_{1RM}^{(e)},\ \underbrace{w / \text{projected}_{1RM}^{(e)}}_{\text{relative load}},\ \text{available}]$$
+
+The key signal is **relative load** — `weight / projected_1rm` tells the model what fraction of this user's maximum they are lifting right now. Without this, the model cannot distinguish a strong user (bench 1RM=140kg) from a weak user (bench 1RM=60kg) both lifting 80kg.
 
 ### $r_m$ — Recovery (per muscle $m$) — Exponential with learned $\tau_m$
 
@@ -148,7 +159,14 @@ If RIR on dips is high but RIR on OHP is low → triceps is fresh, delts are fat
 
 ### Training across users
 
-All users train the **same** $f$ and $g$ networks. User A benching 60kg and User B benching 120kg both contribute to the same model. The network sees raw weight — it learns that heavier loads at same RIR drop MPC more.
+All users train the **same** $f$ and $g$ networks. User A benching 60kg and User B benching 120kg both contribute to the same model.
+
+**Strength personalization via 1RM anchors:** The network receives `relative_load = weight / projected_1rm` as part of the strength feature vector $\mathbf{s}$. This allows the same network to correctly handle both users:
+
+- User A (1RM=60kg) lifting 80kg → `relative_load = 1.33` → near or beyond failure → low RIR
+- User B (1RM=140kg) lifting 80kg → `relative_load = 0.57` → moderate effort → high RIR
+
+The 1RM anchors are updated dynamically after each session using an EMA of Epley-estimated e1RM candidates from high-quality sets (RIR ≤ 3, relative load ≥ 0.5).
 
 ### Recovery training
 
@@ -168,7 +186,7 @@ Wednesday (Δt = 48h): first set bench → g predicts RIR
 | Component | What is assumed | What is learned |
 |-----------|----------------|-----------------|
 | **f** (fatigue) | Involvement matrix from EMG literature; fatigue ordering matches involvement ordering | Drop magnitude as function of weight, reps, RIR, current MPC |
-| **g** (RIR prediction) | Nothing — pure neural network | How MPC state maps to perceived effort |
+| **g** (RIR prediction) | Strength feature vector $\mathbf{s}$ from user's 1RM anchors (bench/squat/deadlift → projected per exercise) | How MPC state and relative load map to perceived effort |
 | **r** (recovery) | Exponential shape; small muscles recover faster than large muscles (on average) | Per-muscle τ values |
 | **MPC** | Starts at 1.0; bounded in [0.1, 1.0] | Everything else — MPC is a latent variable that emerges from training |
 
