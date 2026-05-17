@@ -119,21 +119,24 @@ MAIN_EXERCISES = {
 
 # Default target MPC zones [min_after, max_after]
 DEFAULT_TARGET_ZONES: Dict[str, List[float]] = {
-    "chest":          [0.55, 0.85],
-    "anterior_delts": [0.55, 0.85],
-    "lateral_delts":  [0.55, 0.85],
-    "rear_delts":     [0.55, 0.85],
-    "rhomboids":      [0.55, 0.85],
-    "triceps":        [0.45, 0.80],
-    "biceps":         [0.45, 0.80],
-    "lats":           [0.60, 0.85],
-    "quads":          [0.60, 0.85],
-    "hamstrings":     [0.60, 0.85],
-    "glutes":         [0.60, 0.85],
-    "adductors":      [0.50, 0.85],
-    "erectors":       [0.60, 0.85],
-    "calves":         [0.45, 0.80],
-    "abs":            [0.50, 0.85],
+    # [min_after, max_after] — MPC mięśnia po sesji
+    # min: poniżej = overfatigue (za dużo pracy)
+    # max: powyżej = underfatigue (za mało pracy) — tylko info, nie violation
+    "chest":          [0.45, 0.90],
+    "anterior_delts": [0.45, 0.90],
+    "lateral_delts":  [0.45, 0.90],
+    "rear_delts":     [0.30, 0.90],
+    "rhomboids":      [0.30, 0.90],
+    "triceps":        [0.30, 0.90],
+    "biceps":         [0.30, 0.90],
+    "lats":           [0.35, 0.90],
+    "quads":          [0.35, 0.90],
+    "hamstrings":     [0.35, 0.90],
+    "glutes":         [0.35, 0.90],
+    "adductors":      [0.30, 0.90],
+    "erectors":       [0.30, 0.90],
+    "calves":         [0.35, 0.90],
+    "abs":            [0.35, 0.90],
 }
 
 # Bodyweight fallback [kg] dla ćwiczeń bez 1RM (project_exercise_1rm → None)
@@ -240,14 +243,25 @@ class KnapsackPlanner:
     def __init__(
         self,
         model,
+        inference_module,
         strength_anchors: Dict[str, float],
         target_zones: Optional[Dict[str, List[float]]] = None,
         rest_between_sets_sec: int = 120,
         time_resolution_sec: int = 60,
     ):
-        # Importujemy tu, żeby nie wymagać inference.py przy samym imporcie modułu
-        import inference as _inf
-        self._inf = _inf
+        """
+        Parameters
+        ----------
+        model
+            Wynik inference.load_model() — załadowany checkpoint DeepGain.
+        inference_module
+            Moduł inference (obiekt zwrócony przez importlib lub bezpośredni import).
+            Przekazywany jawnie zamiast importowania wewnętrznie — unika konfliktów
+            z pakietem models/ gdy mpc-poc/ jest w sys.path.
+        strength_anchors
+            {"bench_press": kg, "squat": kg, "deadlift": kg}
+        """
+        self._inf = inference_module
         self.model = model
         self.strength_anchors = strength_anchors
         self.target_zones = target_zones or deepcopy(DEFAULT_TARGET_ZONES)
@@ -331,6 +345,25 @@ class KnapsackPlanner:
         if main_block:
             accessory_exclusions = accessory_exclusions | {main_block.exercise_id}
 
+        # Muscle saturation filter:
+        # Mięśnie mocno zaangażowane przez ćwiczenie główne (engagement ≥ 0.55)
+        # są oznaczone jako "nasycone". Akcesoryjne które też mocno (≥ 0.55) biją
+        # w te same mięśnie są wykluczone — zapobiega np. bench + incline + dips
+        # w jednej sesji co spycha MPC klatki do 0.10.
+        if main_block:
+            SATURATION_THRESHOLD = 0.60
+            saturated = {
+                m for m, r in MUSCLE_INVOLVEMENT.get(main_block.exercise_id, {}).items()
+                if r >= SATURATION_THRESHOLD
+            }
+            for ex_id in list(self._known_exercises):
+                if ex_id in accessory_exclusions:
+                    continue
+                inv = MUSCLE_INVOLVEMENT.get(ex_id, {})
+                if any(r >= SATURATION_THRESHOLD and m in saturated
+                       for m, r in inv.items()):
+                    accessory_exclusions = accessory_exclusions | {ex_id}
+
         accessories = self._build_candidates(
             mpc_state=mpc_before,
             target_rir=target_rir,
@@ -354,7 +387,7 @@ class KnapsackPlanner:
 
         # ── 5. Finalna symulacja i ewaluacja ────────────────────────────────
         mpc_after = self._simulate_mpc(selected, user_history, now)
-        violations, notes = self._evaluate_constraints(mpc_before, mpc_after)
+        violations, notes = self._evaluate_constraints(mpc_before, mpc_after, selected)
 
         total_time = sum(b.time_cost_sec for b in selected)
         total_stimulus = sum(b.stimulus_score for b in selected)
@@ -667,33 +700,53 @@ class KnapsackPlanner:
         max_iterations: int = 5,
     ) -> List[ExerciseBlock]:
         """
-        Jeśli symulacja MPC po wybranym planie narusza ograniczenia (overfatigue),
-        iteracyjnie usuwa najgorszy blok i reruns knapsack na pozostałych kandydatach.
+        Usuwa najgorszy sprawcę overfatigue i reruns DP tylko na akcesoriach.
+
+        Ćwiczenie główne (blocks[0]) jest ZAWSZE chronione — nigdy nie jest usuwane
+        ani pomijane przy ponownym uruchomieniu DP.
         """
+        if not selected:
+            return selected
+
+        # Pierwsze ćwiczenie = główne (trójbój). Chronimy je przez cały repair.
+        main_block = selected[0]
+        main_time  = main_block.time_cost_sec
+
         for iteration in range(max_iterations):
             mpc_after = self._simulate_mpc(selected, user_history, now)
-            violations, _ = self._evaluate_constraints(mpc_before, mpc_after)
+            violations, _ = self._evaluate_constraints(mpc_before, mpc_after, selected)
             overfatigue = [v for v in violations if "OVERFATIGUE" in v]
 
             if not overfatigue:
-                return selected  # Brak naruszeń
+                return selected
 
             logger.warning(
                 f"[repair iter={iteration+1}] Overfatigue violations: {overfatigue}"
             )
 
-            # Znajdź blok odpowiadający za największe naruszenie
-            worst_item = self._find_worst_offender(selected, mpc_before, mpc_after)
+            # Szukaj najgorszego sprawcy TYLKO wśród akcesoriów (nie głównego)
+            accessories = [b for b in selected if b.exercise_id != main_block.exercise_id]
+            worst_item  = self._find_worst_offender(accessories, mpc_before, mpc_after)
+
             if worst_item is None:
+                # Overfatigue pochodzi z głównego — nic nie możemy usunąć
                 break
+
             logger.info(f"  Removing offender: {worst_item.exercise_id}")
 
-            # Usuń z wybranych i z kandydatów (nie wróci do puli)
-            selected = [b for b in selected if b.exercise_id != worst_item.exercise_id]
-            candidates = [c for c in candidates if c.exercise_id != worst_item.exercise_id]
+            # Usuń z kandydatów
+            candidates = [c for c in candidates
+                          if c.exercise_id != worst_item.exercise_id]
 
-            # Reruns DP na pozostałych kandydatach
-            selected = self._knapsack_dp(candidates, time_budget_sec)
+            # Reruns DP tylko na akcesoriach, z budżetem po odjęciu czasu głównego
+            acc_candidates = [c for c in candidates
+                              if c.exercise_id != main_block.exercise_id]
+            acc_selected = self._knapsack_dp(
+                acc_candidates, time_budget_sec - main_time
+            )
+
+            # Zachowaj main na pozycji 0
+            selected = [main_block] + acc_selected
 
         return selected
 
@@ -769,25 +822,54 @@ class KnapsackPlanner:
         self,
         mpc_before: Dict[str, float],
         mpc_after: Dict[str, float],
+        selected: Optional[List["ExerciseBlock"]] = None,
     ) -> Tuple[List[str], List[str]]:
+        """
+        Sprawdza naruszenia target zone po sesji.
+
+        was_worked: mięsień uznany za trenowany gdy MPC spadło o ≥ 0.05.
+        UNDERFATIGUE: zgłaszane tylko gdy mięsień był PRIMARY targetem
+        co najmniej jednego wybranego ćwiczenia (engagement ≥ 0.40).
+        Nie zgłaszamy underfatigue dla mięśni które były tylko pobocznym
+        efektem ćwiczenia albo w ogóle nie były planowane.
+        """
         violations = []
         notes = []
+
+        # Mięśnie które były primary targetem w planie
+        primary_targeted: set = set()
+        if selected:
+            for b in selected:
+                inv = MUSCLE_INVOLVEMENT.get(b.exercise_id, {})
+                for m, r in inv.items():
+                    if r >= 0.40:
+                        primary_targeted.add(m)
+
+        # Mięśnie główne pierwszego ćwiczenia (trójbój) są wyłączone z overfatigue check.
+        # Gdy bench press jest głównym, klatka POWINNA być mocno zmęczona — to cel treningu.
+        main_exempt: set = set()
+        if selected and len(selected) > 0:
+            main_inv = MUSCLE_INVOLVEMENT.get(selected[0].exercise_id, {})
+            main_exempt = {m for m, r in main_inv.items() if r >= 0.60}
 
         for muscle in sorted(mpc_after):
             after = mpc_after[muscle]
             before = mpc_before.get(muscle, 1.0)
             zone = self.target_zones.get(muscle, [0.55, 0.85])
             t_min, t_max = zone
-            was_worked = after < before - 0.02
+            was_worked = after < before - 0.05
 
-            if after < t_min:
+            if after < t_min and muscle not in main_exempt:
                 msg = f"⚠ OVERFATIGUE  {muscle}: MPC={after:.2f} < min={t_min:.2f}"
                 violations.append(msg)
                 notes.append(msg)
+            elif after < t_min and muscle in main_exempt:
+                # Mięsień główny mocno zmęczony — oczekiwane, nie flagujemy
+                notes.append(f"✓ MAIN TARGET  {muscle}: MPC={after:.2f} (intentional fatigue)")
             elif was_worked and after > t_max:
-                msg = f"⚠ UNDERFATIGUE {muscle}: MPC={after:.2f} > max={t_max:.2f}"
-                violations.append(msg)
-                notes.append(msg)
+                # Dodaj do notes gdy: selected=None (test), lub mięsień był primary target
+                if selected is None or muscle in primary_targeted:
+                    notes.append(f"~ UNDERFATIGUE {muscle}: MPC={after:.2f} > max={t_max:.2f}")
             elif was_worked:
                 notes.append(f"✓ OK           {muscle}: MPC={after:.2f} in [{t_min:.2f}, {t_max:.2f}]")
 
