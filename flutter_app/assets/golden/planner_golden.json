@@ -1,0 +1,1246 @@
+[
+  {
+    "name": "01_fresh_user_60min_average",
+    "anchors_kg": {
+      "bench_press": 80.0,
+      "squat": 120.0,
+      "deadlift": 160.0
+    },
+    "history": [],
+    "time_budget_sec": 3600,
+    "target_rir": 3,
+    "exclusions": [],
+    "now": "2026-04-28T10:00:00",
+    "expected_blocks": [
+      {
+        "exercise_id": "leg_curl",
+        "weight_kg": 12.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.079368218779564,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "hamstrings"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "leg_extension",
+        "weight_kg": 15.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.2362829595804214,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "quads"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "reverse_fly",
+        "weight_kg": 50.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.765185534954071,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "rear_delts",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "lateral_delts"
+        ]
+      },
+      {
+        "exercise_id": "skull_crusher",
+        "weight_kg": 7.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.9126653671264648,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "triceps"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "lat_pulldown",
+        "weight_kg": 17.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 0.9903576970100403,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 465,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "biceps"
+        ],
+        "secondary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "leg_press",
+        "weight_kg": 107.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.384972870349884,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 510,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "quads",
+          "glutes"
+        ],
+        "secondary_muscles": [
+          "hamstrings"
+        ]
+      },
+      {
+        "exercise_id": "pull_up",
+        "weight_kg": 25.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.9992368817329407,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 510,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "biceps",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "ab_wheel",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 2,
+        "rest_sec": 120,
+        "predicted_rir": 1.790471076965332,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 240,
+        "ex_type": "core",
+        "primary_muscles": [
+          "abs"
+        ],
+        "secondary_muscles": [
+          "triceps"
+        ]
+      }
+    ],
+    "expected_total_time_sec": 3405,
+    "expected_total_stimulus": 8.0,
+    "expected_mpc_before": {
+      "chest": 1.0,
+      "anterior_delts": 1.0,
+      "lateral_delts": 1.0,
+      "rear_delts": 1.0,
+      "rhomboids": 1.0,
+      "triceps": 1.0,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "expected_mpc_after": {
+      "chest": 1.0,
+      "anterior_delts": 0.9505405426025391,
+      "lateral_delts": 0.676367998123169,
+      "rear_delts": 0.6582440137863159,
+      "rhomboids": 0.6571547985076904,
+      "triceps": 0.9884278178215027,
+      "biceps": 0.6584551930427551,
+      "lats": 0.9627791047096252,
+      "quads": 0.48419851064682007,
+      "hamstrings": 0.7449237704277039,
+      "glutes": 0.7703549265861511,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 0.8502387404441833
+    },
+    "expected_violations": [
+      "\u26a0 UNDERFATIGUE abs: MPC=0.85 > max=0.85",
+      "\u26a0 UNDERFATIGUE anterior_delts: MPC=0.95 > max=0.85",
+      "\u26a0 UNDERFATIGUE lats: MPC=0.96 > max=0.85",
+      "\u26a0 OVERFATIGUE  quads: MPC=0.48 < min=0.60"
+    ]
+  },
+  {
+    "name": "02_post_bench_history_60min",
+    "anchors_kg": {
+      "bench_press": 80.0,
+      "squat": 120.0,
+      "deadlift": 160.0
+    },
+    "history": [
+      {
+        "exercise": "bench_press",
+        "weight_kg": 80.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-04-26T18:00:00"
+      },
+      {
+        "exercise": "incline_bench",
+        "weight_kg": 65.0,
+        "reps": 8,
+        "rir": 2,
+        "timestamp": "2026-04-26T18:25:00"
+      },
+      {
+        "exercise": "close_grip_bench",
+        "weight_kg": 55.0,
+        "reps": 8,
+        "rir": 2,
+        "timestamp": "2026-04-26T18:50:00"
+      }
+    ],
+    "time_budget_sec": 3600,
+    "target_rir": 2,
+    "exclusions": [],
+    "now": "2026-04-28T10:00:00",
+    "expected_blocks": [
+      {
+        "exercise_id": "seal_row",
+        "weight_kg": 45.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.9997487962245941,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 510,
+        "ex_type": "variation",
+        "primary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ],
+        "secondary_muscles": [
+          "lats",
+          "biceps"
+        ]
+      },
+      {
+        "exercise_id": "leg_curl",
+        "weight_kg": 12.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.1990649998188019,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "hamstrings"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "leg_extension",
+        "weight_kg": 15.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.2684237957000732,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "quads"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "reverse_fly",
+        "weight_kg": 50.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.785530686378479,
+        "stimulus_score": 0.999995401927403,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "rear_delts",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "lateral_delts"
+        ]
+      },
+      {
+        "exercise_id": "skull_crusher",
+        "weight_kg": 7.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.9483263790607452,
+        "stimulus_score": 0.9961264669895172,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "triceps"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "lat_pulldown",
+        "weight_kg": 17.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.0680105537176132,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 465,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "biceps"
+        ],
+        "secondary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "pull_up",
+        "weight_kg": 27.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.9989396631717682,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 510,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "biceps",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "ab_wheel",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 2,
+        "rest_sec": 120,
+        "predicted_rir": 1.7970570921897888,
+        "stimulus_score": 0.9995743717466082,
+        "time_cost_sec": 240,
+        "ex_type": "core",
+        "primary_muscles": [
+          "abs"
+        ],
+        "secondary_muscles": [
+          "triceps"
+        ]
+      }
+    ],
+    "expected_total_time_sec": 3405,
+    "expected_total_stimulus": 7.995696240663529,
+    "expected_mpc_before": {
+      "chest": 0.9370798468589783,
+      "anterior_delts": 0.9880792498588562,
+      "lateral_delts": 0.9999731779098511,
+      "rear_delts": 1.0,
+      "rhomboids": 1.0,
+      "triceps": 0.9970206022262573,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "expected_mpc_after": {
+      "chest": 0.9406915903091431,
+      "anterior_delts": 0.9415066838264465,
+      "lateral_delts": 0.6711767911911011,
+      "rear_delts": 0.44471001625061035,
+      "rhomboids": 0.4608176350593567,
+      "triceps": 0.9854040145874023,
+      "biceps": 0.5766326189041138,
+      "lats": 0.8901646733283997,
+      "quads": 0.938290536403656,
+      "hamstrings": 0.7561981081962585,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 0.9009493589401245,
+      "calves": 1.0,
+      "abs": 0.8512505292892456
+    },
+    "expected_violations": [
+      "\u26a0 UNDERFATIGUE abs: MPC=0.85 > max=0.85",
+      "\u26a0 UNDERFATIGUE anterior_delts: MPC=0.94 > max=0.85",
+      "\u26a0 UNDERFATIGUE erectors: MPC=0.90 > max=0.85",
+      "\u26a0 UNDERFATIGUE lats: MPC=0.89 > max=0.85",
+      "\u26a0 UNDERFATIGUE quads: MPC=0.94 > max=0.85",
+      "\u26a0 OVERFATIGUE  rear_delts: MPC=0.44 < min=0.55",
+      "\u26a0 OVERFATIGUE  rhomboids: MPC=0.46 < min=0.55"
+    ]
+  },
+  {
+    "name": "03_push_day_no_legs_30min",
+    "anchors_kg": {
+      "bench_press": 80.0,
+      "squat": 120.0,
+      "deadlift": 160.0
+    },
+    "history": [],
+    "time_budget_sec": 1800,
+    "target_rir": 2,
+    "exclusions": [
+      "squat",
+      "low_bar_squat",
+      "high_bar_squat",
+      "leg_press",
+      "bulgarian_split_squat",
+      "leg_curl",
+      "leg_extension",
+      "rdl"
+    ],
+    "now": "2026-04-28T10:00:00",
+    "expected_blocks": [
+      {
+        "exercise_id": "reverse_fly",
+        "weight_kg": 50.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.765185534954071,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "rear_delts",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "lateral_delts"
+        ]
+      },
+      {
+        "exercise_id": "skull_crusher",
+        "weight_kg": 7.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.9126653671264648,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "triceps"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "lat_pulldown",
+        "weight_kg": 17.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 0.9903576970100403,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 465,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "biceps"
+        ],
+        "secondary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "ab_wheel",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 2,
+        "rest_sec": 120,
+        "predicted_rir": 1.790471076965332,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 240,
+        "ex_type": "core",
+        "primary_muscles": [
+          "abs"
+        ],
+        "secondary_muscles": [
+          "triceps"
+        ]
+      }
+    ],
+    "expected_total_time_sec": 1545,
+    "expected_total_stimulus": 4.0,
+    "expected_mpc_before": {
+      "chest": 1.0,
+      "anterior_delts": 1.0,
+      "lateral_delts": 1.0,
+      "rear_delts": 1.0,
+      "rhomboids": 1.0,
+      "triceps": 1.0,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "expected_mpc_after": {
+      "chest": 1.0,
+      "anterior_delts": 0.9494508504867554,
+      "lateral_delts": 0.6660175323486328,
+      "rear_delts": 0.6459232568740845,
+      "rhomboids": 0.8195965886116028,
+      "triceps": 0.9880576133728027,
+      "biceps": 0.8464159965515137,
+      "lats": 0.9672353267669678,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 0.8502387404441833
+    },
+    "expected_violations": [
+      "\u26a0 UNDERFATIGUE abs: MPC=0.85 > max=0.85",
+      "\u26a0 UNDERFATIGUE anterior_delts: MPC=0.95 > max=0.85",
+      "\u26a0 UNDERFATIGUE biceps: MPC=0.85 > max=0.80",
+      "\u26a0 UNDERFATIGUE lats: MPC=0.97 > max=0.85"
+    ]
+  },
+  {
+    "name": "05_full_body_yesterday_45min",
+    "anchors_kg": {
+      "bench_press": 80.0,
+      "squat": 120.0,
+      "deadlift": 160.0
+    },
+    "history": [
+      {
+        "exercise": "squat",
+        "weight_kg": 100.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-04-27T17:00:00"
+      },
+      {
+        "exercise": "bench_press",
+        "weight_kg": 80.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-04-27T17:35:00"
+      },
+      {
+        "exercise": "deadlift",
+        "weight_kg": 140.0,
+        "reps": 3,
+        "rir": 1,
+        "timestamp": "2026-04-27T18:10:00"
+      },
+      {
+        "exercise": "ohp",
+        "weight_kg": 50.0,
+        "reps": 8,
+        "rir": 2,
+        "timestamp": "2026-04-27T18:40:00"
+      }
+    ],
+    "time_budget_sec": 2700,
+    "target_rir": 2,
+    "exclusions": [],
+    "now": "2026-04-28T10:00:00",
+    "expected_blocks": [
+      {
+        "exercise_id": "seal_row",
+        "weight_kg": 50.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.9996416568756104,
+        "stimulus_score": 0.9991374015808105,
+        "time_cost_sec": 510,
+        "ex_type": "variation",
+        "primary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ],
+        "secondary_muscles": [
+          "lats",
+          "biceps"
+        ]
+      },
+      {
+        "exercise_id": "skull_crusher",
+        "weight_kg": 7.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.000143826007843,
+        "stimulus_score": 0.9897948741912842,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "triceps"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "lat_pulldown",
+        "weight_kg": 17.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.6830094158649445,
+        "stimulus_score": 0.99949128811176,
+        "time_cost_sec": 465,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "biceps"
+        ],
+        "secondary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "pull_up",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.001318782567978,
+        "stimulus_score": 0.9995490962808783,
+        "time_cost_sec": 510,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "biceps",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "leg_extension",
+        "weight_kg": 15.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 0.8004371076822281,
+        "stimulus_score": 0.7041848897933961,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "quads"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "ab_wheel",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 2,
+        "rest_sec": 120,
+        "predicted_rir": 1.6244105994701385,
+        "stimulus_score": 0.9992014765739442,
+        "time_cost_sec": 240,
+        "ex_type": "core",
+        "primary_muscles": [
+          "abs"
+        ],
+        "secondary_muscles": [
+          "triceps"
+        ]
+      }
+    ],
+    "expected_total_time_sec": 2565,
+    "expected_total_stimulus": 5.691359026532074,
+    "expected_mpc_before": {
+      "chest": 0.7357994914054871,
+      "anterior_delts": 0.948255717754364,
+      "lateral_delts": 0.9778757691383362,
+      "rear_delts": 0.9966933727264404,
+      "rhomboids": 1.0,
+      "triceps": 0.9944103360176086,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 0.704184889793396,
+      "hamstrings": 0.6587355136871338,
+      "glutes": 0.8319655060768127,
+      "adductors": 1.0,
+      "erectors": 0.8230714797973633,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "expected_mpc_after": {
+      "chest": 0.7473065853118896,
+      "anterior_delts": 0.9175872206687927,
+      "lateral_delts": 0.9795597195625305,
+      "rear_delts": 0.4567776918411255,
+      "rhomboids": 0.4851328134536743,
+      "triceps": 0.9830891489982605,
+      "biceps": 0.6269625425338745,
+      "lats": 0.8866334557533264,
+      "quads": 0.6640219688415527,
+      "hamstrings": 0.6719801425933838,
+      "glutes": 0.8397603631019592,
+      "adductors": 1.0,
+      "erectors": 0.7933412790298462,
+      "calves": 1.0,
+      "abs": 0.8515914082527161
+    },
+    "expected_violations": [
+      "\u26a0 UNDERFATIGUE abs: MPC=0.85 > max=0.85",
+      "\u26a0 UNDERFATIGUE anterior_delts: MPC=0.92 > max=0.85",
+      "\u26a0 UNDERFATIGUE lats: MPC=0.89 > max=0.85",
+      "\u26a0 OVERFATIGUE  rear_delts: MPC=0.46 < min=0.55",
+      "\u26a0 OVERFATIGUE  rhomboids: MPC=0.49 < min=0.55"
+    ]
+  },
+  {
+    "name": "10_tired_legs_45min",
+    "anchors_kg": {
+      "bench_press": 80.0,
+      "squat": 120.0,
+      "deadlift": 160.0
+    },
+    "history": [
+      {
+        "exercise": "squat",
+        "weight_kg": 100.0,
+        "reps": 5,
+        "rir": 2,
+        "timestamp": "2026-04-27T17:00:00"
+      },
+      {
+        "exercise": "leg_press",
+        "weight_kg": 180.0,
+        "reps": 10,
+        "rir": 2,
+        "timestamp": "2026-04-27T17:30:00"
+      },
+      {
+        "exercise": "bulgarian_split_squat",
+        "weight_kg": 40.0,
+        "reps": 10,
+        "rir": 2,
+        "timestamp": "2026-04-27T18:00:00"
+      },
+      {
+        "exercise": "leg_curl",
+        "weight_kg": 45.0,
+        "reps": 12,
+        "rir": 2,
+        "timestamp": "2026-04-27T18:25:00"
+      }
+    ],
+    "time_budget_sec": 2700,
+    "target_rir": 2,
+    "exclusions": [],
+    "now": "2026-04-28T10:00:00",
+    "expected_blocks": [
+      {
+        "exercise_id": "seal_row",
+        "weight_kg": 50.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.000313252210617,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 510,
+        "ex_type": "variation",
+        "primary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ],
+        "secondary_muscles": [
+          "lats",
+          "biceps"
+        ]
+      },
+      {
+        "exercise_id": "reverse_fly",
+        "weight_kg": 50.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.5350308418273926,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "rear_delts",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "lateral_delts"
+        ]
+      },
+      {
+        "exercise_id": "skull_crusher",
+        "weight_kg": 10.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.0000429451465607,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "triceps"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "lat_pulldown",
+        "weight_kg": 17.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.7138637602329254,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 465,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "biceps"
+        ],
+        "secondary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "pull_up",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.9999346137046814,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 510,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "biceps",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "ab_wheel",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 2,
+        "rest_sec": 120,
+        "predicted_rir": 1.9464901089668274,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 240,
+        "ex_type": "core",
+        "primary_muscles": [
+          "abs"
+        ],
+        "secondary_muscles": [
+          "triceps"
+        ]
+      }
+    ],
+    "expected_total_time_sec": 2565,
+    "expected_total_stimulus": 6.0,
+    "expected_mpc_before": {
+      "chest": 1.0,
+      "anterior_delts": 1.0,
+      "lateral_delts": 1.0,
+      "rear_delts": 1.0,
+      "rhomboids": 1.0,
+      "triceps": 1.0,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 0.6897962093353271,
+      "hamstrings": 0.9250805974006653,
+      "glutes": 0.820823073387146,
+      "adductors": 1.0,
+      "erectors": 0.9048928618431091,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "expected_mpc_after": {
+      "chest": 1.0,
+      "anterior_delts": 0.9648191332817078,
+      "lateral_delts": 0.671388566493988,
+      "rear_delts": 0.4482821226119995,
+      "rhomboids": 0.48821741342544556,
+      "triceps": 0.98727947473526,
+      "biceps": 0.6423670649528503,
+      "lats": 0.8739059567451477,
+      "quads": 0.7012134194374084,
+      "hamstrings": 0.9279881715774536,
+      "glutes": 0.8291349411010742,
+      "adductors": 1.0,
+      "erectors": 0.8544831871986389,
+      "calves": 1.0,
+      "abs": 0.851944088935852
+    },
+    "expected_violations": [
+      "\u26a0 UNDERFATIGUE abs: MPC=0.85 > max=0.85",
+      "\u26a0 UNDERFATIGUE anterior_delts: MPC=0.96 > max=0.85",
+      "\u26a0 UNDERFATIGUE erectors: MPC=0.85 > max=0.85",
+      "\u26a0 UNDERFATIGUE lats: MPC=0.87 > max=0.85",
+      "\u26a0 OVERFATIGUE  rear_delts: MPC=0.45 < min=0.55",
+      "\u26a0 OVERFATIGUE  rhomboids: MPC=0.49 < min=0.55"
+    ]
+  },
+  {
+    "name": "04a_strong_user_compound_45min",
+    "anchors_kg": {
+      "bench_press": 140.0,
+      "squat": 200.0,
+      "deadlift": 240.0
+    },
+    "history": [],
+    "time_budget_sec": 2700,
+    "target_rir": 2,
+    "exclusions": [],
+    "now": "2026-04-28T10:00:00",
+    "expected_blocks": [
+      {
+        "exercise_id": "leg_curl",
+        "weight_kg": 20.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 0.7385161519050598,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "hamstrings"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "leg_extension",
+        "weight_kg": 25.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 0.7771772891283035,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "quads"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "reverse_fly",
+        "weight_kg": 50.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.6317307353019714,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "rear_delts",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "lateral_delts"
+        ]
+      },
+      {
+        "exercise_id": "skull_crusher",
+        "weight_kg": 12.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.8291905522346497,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "triceps"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "lat_pulldown",
+        "weight_kg": 27.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 0.8689331263303757,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 465,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "biceps"
+        ],
+        "secondary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "ab_wheel",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 2,
+        "rest_sec": 120,
+        "predicted_rir": 1.3304702937602997,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 240,
+        "ex_type": "core",
+        "primary_muscles": [
+          "abs"
+        ],
+        "secondary_muscles": [
+          "triceps"
+        ]
+      }
+    ],
+    "expected_total_time_sec": 2385,
+    "expected_total_stimulus": 6.0,
+    "expected_mpc_before": {
+      "chest": 1.0,
+      "anterior_delts": 1.0,
+      "lateral_delts": 1.0,
+      "rear_delts": 1.0,
+      "rhomboids": 1.0,
+      "triceps": 1.0,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "expected_mpc_after": {
+      "chest": 1.0,
+      "anterior_delts": 0.951393187046051,
+      "lateral_delts": 0.671234130859375,
+      "rear_delts": 0.6541322469711304,
+      "rhomboids": 0.7804358005523682,
+      "triceps": 0.9858606457710266,
+      "biceps": 0.8011806607246399,
+      "lats": 0.9793641567230225,
+      "quads": 0.9531985521316528,
+      "hamstrings": 0.8007652759552002,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 0.807453989982605
+    },
+    "expected_violations": [
+      "\u26a0 UNDERFATIGUE anterior_delts: MPC=0.95 > max=0.85",
+      "\u26a0 UNDERFATIGUE biceps: MPC=0.80 > max=0.80",
+      "\u26a0 UNDERFATIGUE lats: MPC=0.98 > max=0.85",
+      "\u26a0 UNDERFATIGUE quads: MPC=0.95 > max=0.85"
+    ]
+  },
+  {
+    "name": "04b_beginner_user_compound_45min",
+    "anchors_kg": {
+      "bench_press": 40.0,
+      "squat": 60.0,
+      "deadlift": 80.0
+    },
+    "history": [],
+    "time_budget_sec": 2700,
+    "target_rir": 2,
+    "exclusions": [],
+    "now": "2026-04-28T10:00:00",
+    "expected_blocks": [
+      {
+        "exercise_id": "leg_curl",
+        "weight_kg": 5.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.5356135368347168,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "hamstrings"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "leg_extension",
+        "weight_kg": 7.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.4684203267097473,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "quads"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "reverse_fly",
+        "weight_kg": 50.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 2.77229905128479,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "rear_delts",
+          "rhomboids"
+        ],
+        "secondary_muscles": [
+          "lateral_delts"
+        ]
+      },
+      {
+        "exercise_id": "skull_crusher",
+        "weight_kg": 5.0,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.762106716632843,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 420,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "triceps"
+        ],
+        "secondary_muscles": []
+      },
+      {
+        "exercise_id": "lat_pulldown",
+        "weight_kg": 7.5,
+        "reps": 10,
+        "sets_count": 3,
+        "rest_sec": 120,
+        "predicted_rir": 1.4521929621696472,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 465,
+        "ex_type": "isolation",
+        "primary_muscles": [
+          "lats",
+          "biceps"
+        ],
+        "secondary_muscles": [
+          "rhomboids",
+          "rear_delts"
+        ]
+      },
+      {
+        "exercise_id": "ab_wheel",
+        "weight_kg": 30.0,
+        "reps": 10,
+        "sets_count": 2,
+        "rest_sec": 120,
+        "predicted_rir": 1.8096692860126495,
+        "stimulus_score": 1.0,
+        "time_cost_sec": 240,
+        "ex_type": "core",
+        "primary_muscles": [
+          "abs"
+        ],
+        "secondary_muscles": [
+          "triceps"
+        ]
+      }
+    ],
+    "expected_total_time_sec": 2385,
+    "expected_total_stimulus": 6.0,
+    "expected_mpc_before": {
+      "chest": 1.0,
+      "anterior_delts": 1.0,
+      "lateral_delts": 1.0,
+      "rear_delts": 1.0,
+      "rhomboids": 1.0,
+      "triceps": 1.0,
+      "biceps": 1.0,
+      "lats": 1.0,
+      "quads": 1.0,
+      "hamstrings": 1.0,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 1.0
+    },
+    "expected_mpc_after": {
+      "chest": 1.0,
+      "anterior_delts": 0.981198787689209,
+      "lateral_delts": 0.6596415042877197,
+      "rear_delts": 0.6271841526031494,
+      "rhomboids": 0.7353960871696472,
+      "triceps": 0.9971601963043213,
+      "biceps": 0.7740160822868347,
+      "lats": 0.9755910634994507,
+      "quads": 0.9052287340164185,
+      "hamstrings": 0.9734576940536499,
+      "glutes": 1.0,
+      "adductors": 1.0,
+      "erectors": 1.0,
+      "calves": 1.0,
+      "abs": 0.7720307111740112
+    },
+    "expected_violations": [
+      "\u26a0 UNDERFATIGUE hamstrings: MPC=0.97 > max=0.85",
+      "\u26a0 UNDERFATIGUE lats: MPC=0.98 > max=0.85",
+      "\u26a0 UNDERFATIGUE quads: MPC=0.91 > max=0.85"
+    ]
+  }
+]

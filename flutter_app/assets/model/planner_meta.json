@@ -1,0 +1,634 @@
+{
+  "muscle_involvement": {
+    "bench_press": {
+      "chest": 0.8,
+      "triceps": 0.6,
+      "anterior_delts": 0.35,
+      "lateral_delts": 0.15
+    },
+    "spoto_press": {
+      "chest": 0.7,
+      "triceps": 0.55,
+      "anterior_delts": 0.4
+    },
+    "decline_bench": {
+      "chest": 0.85,
+      "triceps": 0.5,
+      "anterior_delts": 0.2
+    },
+    "close_grip_bench": {
+      "chest": 0.65,
+      "triceps": 0.85,
+      "anterior_delts": 0.3
+    },
+    "chest_press_machine": {
+      "chest": 0.75,
+      "triceps": 0.45,
+      "anterior_delts": 0.35
+    },
+    "incline_bench": {
+      "chest": 0.75,
+      "anterior_delts": 0.55,
+      "triceps": 0.45,
+      "lateral_delts": 0.15
+    },
+    "incline_bench_45": {
+      "chest": 0.7,
+      "anterior_delts": 0.65,
+      "triceps": 0.4
+    },
+    "dips": {
+      "chest": 0.65,
+      "triceps": 0.75,
+      "anterior_delts": 0.4
+    },
+    "ohp": {
+      "anterior_delts": 0.75,
+      "lateral_delts": 0.55,
+      "triceps": 0.55,
+      "chest": 0.3
+    },
+    "skull_crusher": {
+      "triceps": 0.9,
+      "anterior_delts": 0.1
+    },
+    "dumbbell_flyes": {
+      "chest": 0.85,
+      "anterior_delts": 0.3
+    },
+    "pendlay_row": {
+      "lats": 0.6,
+      "rhomboids": 0.75,
+      "rear_delts": 0.55,
+      "biceps": 0.45,
+      "erectors": 0.5
+    },
+    "seal_row": {
+      "lats": 0.55,
+      "rhomboids": 0.7,
+      "rear_delts": 0.6,
+      "biceps": 0.45
+    },
+    "lat_pulldown": {
+      "lats": 0.7,
+      "rhomboids": 0.45,
+      "biceps": 0.5,
+      "rear_delts": 0.3
+    },
+    "pull_up": {
+      "lats": 0.8,
+      "rhomboids": 0.55,
+      "biceps": 0.55,
+      "rear_delts": 0.3
+    },
+    "reverse_fly": {
+      "rear_delts": 0.85,
+      "rhomboids": 0.6,
+      "lateral_delts": 0.3
+    },
+    "squat": {
+      "quads": 0.65,
+      "glutes": 0.4,
+      "hamstrings": 0.3,
+      "erectors": 0.45,
+      "adductors": 0.35,
+      "abs": 0.2
+    },
+    "low_bar_squat": {
+      "quads": 0.5,
+      "glutes": 0.5,
+      "hamstrings": 0.4,
+      "erectors": 0.5,
+      "adductors": 0.4
+    },
+    "high_bar_squat": {
+      "quads": 0.75,
+      "glutes": 0.45,
+      "hamstrings": 0.25,
+      "erectors": 0.35,
+      "adductors": 0.3
+    },
+    "leg_press": {
+      "quads": 0.75,
+      "glutes": 0.4,
+      "hamstrings": 0.25
+    },
+    "leg_extension": {
+      "quads": 0.95
+    },
+    "bulgarian_split_squat": {
+      "quads": 0.8,
+      "glutes": 0.65,
+      "hamstrings": 0.25
+    },
+    "leg_curl": {
+      "hamstrings": 0.95
+    },
+    "deadlift": {
+      "hamstrings": 0.6,
+      "glutes": 0.55,
+      "erectors": 0.7,
+      "quads": 0.3,
+      "lats": 0.4,
+      "rhomboids": 0.3
+    },
+    "sumo_deadlift": {
+      "hamstrings": 0.45,
+      "glutes": 0.5,
+      "quads": 0.5,
+      "adductors": 0.55,
+      "erectors": 0.5
+    },
+    "rdl": {
+      "hamstrings": 0.85,
+      "glutes": 0.55,
+      "erectors": 0.5
+    },
+    "farmers_walk": {
+      "erectors": 0.45,
+      "abs": 0.35,
+      "glutes": 0.25,
+      "calves": 0.3
+    },
+    "suitcase_carry": {
+      "abs": 0.75,
+      "erectors": 0.55,
+      "lats": 0.3
+    },
+    "ab_wheel": {
+      "abs": 0.9,
+      "lats": 0.3,
+      "triceps": 0.2
+    },
+    "plank": {
+      "abs": 0.75,
+      "erectors": 0.3
+    },
+    "leg_raises": {
+      "abs": 0.85,
+      "lats": 0.25
+    },
+    "dead_bug": {
+      "abs": 0.8,
+      "erectors": 0.2
+    },
+    "bird_dog": {
+      "erectors": 0.7,
+      "glutes": 0.5,
+      "abs": 0.4
+    },
+    "trx_bodysaw": {
+      "abs": 0.85,
+      "anterior_delts": 0.3,
+      "lats": 0.3
+    }
+  },
+  "exercise_meta": {
+    "bench_press": {
+      "type": "compound",
+      "sets": 3,
+      "reps": [
+        3,
+        5,
+        6,
+        8
+      ],
+      "set_sec": 120,
+      "intensity": 0.78
+    },
+    "squat": {
+      "type": "compound",
+      "sets": 3,
+      "reps": [
+        3,
+        5,
+        6,
+        8
+      ],
+      "set_sec": 150,
+      "intensity": 0.8
+    },
+    "low_bar_squat": {
+      "type": "compound",
+      "sets": 3,
+      "reps": [
+        3,
+        5,
+        6,
+        8
+      ],
+      "set_sec": 150,
+      "intensity": 0.8
+    },
+    "high_bar_squat": {
+      "type": "compound",
+      "sets": 3,
+      "reps": [
+        5,
+        6,
+        8
+      ],
+      "set_sec": 150,
+      "intensity": 0.78
+    },
+    "deadlift": {
+      "type": "compound",
+      "sets": 3,
+      "reps": [
+        3,
+        5,
+        6
+      ],
+      "set_sec": 180,
+      "intensity": 0.82
+    },
+    "sumo_deadlift": {
+      "type": "compound",
+      "sets": 3,
+      "reps": [
+        3,
+        5,
+        6
+      ],
+      "set_sec": 180,
+      "intensity": 0.8
+    },
+    "spoto_press": {
+      "type": "variation",
+      "sets": 3,
+      "reps": [
+        5,
+        6,
+        8
+      ],
+      "set_sec": 120,
+      "intensity": 0.75
+    },
+    "decline_bench": {
+      "type": "variation",
+      "sets": 3,
+      "reps": [
+        6,
+        8,
+        10
+      ],
+      "set_sec": 120,
+      "intensity": 0.75
+    },
+    "close_grip_bench": {
+      "type": "variation",
+      "sets": 3,
+      "reps": [
+        6,
+        8,
+        10
+      ],
+      "set_sec": 120,
+      "intensity": 0.75
+    },
+    "incline_bench": {
+      "type": "variation",
+      "sets": 3,
+      "reps": [
+        6,
+        8,
+        10
+      ],
+      "set_sec": 120,
+      "intensity": 0.75
+    },
+    "incline_bench_45": {
+      "type": "variation",
+      "sets": 3,
+      "reps": [
+        6,
+        8,
+        10
+      ],
+      "set_sec": 120,
+      "intensity": 0.72
+    },
+    "ohp": {
+      "type": "variation",
+      "sets": 3,
+      "reps": [
+        5,
+        6,
+        8,
+        10
+      ],
+      "set_sec": 105,
+      "intensity": 0.72
+    },
+    "pendlay_row": {
+      "type": "variation",
+      "sets": 3,
+      "reps": [
+        5,
+        6,
+        8
+      ],
+      "set_sec": 105,
+      "intensity": 0.78
+    },
+    "seal_row": {
+      "type": "variation",
+      "sets": 3,
+      "reps": [
+        6,
+        8,
+        10
+      ],
+      "set_sec": 90,
+      "intensity": 0.75
+    },
+    "chest_press_machine": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        10,
+        12,
+        15
+      ],
+      "set_sec": 75,
+      "intensity": 0.7
+    },
+    "dips": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        8,
+        10,
+        12
+      ],
+      "set_sec": 90,
+      "intensity": 0.72
+    },
+    "lat_pulldown": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        8,
+        10,
+        12
+      ],
+      "set_sec": 75,
+      "intensity": 0.68
+    },
+    "pull_up": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        5,
+        6,
+        8,
+        10
+      ],
+      "set_sec": 90,
+      "intensity": 0.7
+    },
+    "dumbbell_flyes": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        10,
+        12,
+        15
+      ],
+      "set_sec": 75,
+      "intensity": 0.55
+    },
+    "skull_crusher": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        10,
+        12,
+        15
+      ],
+      "set_sec": 60,
+      "intensity": 0.55
+    },
+    "reverse_fly": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        12,
+        15
+      ],
+      "set_sec": 60,
+      "intensity": 0.5
+    },
+    "leg_press": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        8,
+        10,
+        12
+      ],
+      "set_sec": 90,
+      "intensity": 0.7
+    },
+    "leg_curl": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        10,
+        12,
+        15
+      ],
+      "set_sec": 60,
+      "intensity": 0.65
+    },
+    "leg_extension": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        10,
+        12,
+        15
+      ],
+      "set_sec": 60,
+      "intensity": 0.65
+    },
+    "bulgarian_split_squat": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        8,
+        10,
+        12
+      ],
+      "set_sec": 120,
+      "intensity": 0.65
+    },
+    "rdl": {
+      "type": "isolation",
+      "sets": 3,
+      "reps": [
+        8,
+        10,
+        12
+      ],
+      "set_sec": 120,
+      "intensity": 0.68
+    },
+    "farmers_walk": {
+      "type": "core",
+      "sets": 2,
+      "reps": [
+        10,
+        15
+      ],
+      "set_sec": 60,
+      "intensity": 0.6
+    },
+    "suitcase_carry": {
+      "type": "core",
+      "sets": 2,
+      "reps": [
+        10,
+        15
+      ],
+      "set_sec": 60,
+      "intensity": 0.4
+    },
+    "ab_wheel": {
+      "type": "core",
+      "sets": 2,
+      "reps": [
+        8,
+        10,
+        12
+      ],
+      "set_sec": 60,
+      "intensity": 0.4
+    },
+    "plank": {
+      "type": "core",
+      "sets": 2,
+      "reps": [
+        10,
+        15,
+        20
+      ],
+      "set_sec": 45,
+      "intensity": 0.3
+    },
+    "leg_raises": {
+      "type": "core",
+      "sets": 2,
+      "reps": [
+        10,
+        12,
+        15
+      ],
+      "set_sec": 60,
+      "intensity": 0.3
+    },
+    "dead_bug": {
+      "type": "core",
+      "sets": 2,
+      "reps": [
+        8,
+        10,
+        12
+      ],
+      "set_sec": 45,
+      "intensity": 0.25
+    },
+    "bird_dog": {
+      "type": "core",
+      "sets": 2,
+      "reps": [
+        8,
+        10,
+        12
+      ],
+      "set_sec": 45,
+      "intensity": 0.25
+    },
+    "trx_bodysaw": {
+      "type": "core",
+      "sets": 2,
+      "reps": [
+        10,
+        12
+      ],
+      "set_sec": 60,
+      "intensity": 0.3
+    }
+  },
+  "main_exercises": [
+    "bench_press",
+    "deadlift",
+    "high_bar_squat",
+    "low_bar_squat",
+    "squat",
+    "sumo_deadlift"
+  ],
+  "default_target_zones": {
+    "chest": [
+      0.55,
+      0.85
+    ],
+    "anterior_delts": [
+      0.55,
+      0.85
+    ],
+    "lateral_delts": [
+      0.55,
+      0.85
+    ],
+    "rear_delts": [
+      0.55,
+      0.85
+    ],
+    "rhomboids": [
+      0.55,
+      0.85
+    ],
+    "triceps": [
+      0.45,
+      0.8
+    ],
+    "biceps": [
+      0.45,
+      0.8
+    ],
+    "lats": [
+      0.6,
+      0.85
+    ],
+    "quads": [
+      0.6,
+      0.85
+    ],
+    "hamstrings": [
+      0.6,
+      0.85
+    ],
+    "glutes": [
+      0.6,
+      0.85
+    ],
+    "adductors": [
+      0.5,
+      0.85
+    ],
+    "erectors": [
+      0.6,
+      0.85
+    ],
+    "calves": [
+      0.45,
+      0.8
+    ],
+    "abs": [
+      0.5,
+      0.85
+    ]
+  },
+  "bodyweight_fallback_kg": 40.0
+}

@@ -30,13 +30,13 @@
         "exercise": "bench_press",
         "weight_kg": 80.0,
         "reps": 5,
-        "expected_rir": 4.542803764343262
+        "expected_rir": 3.0434319376945496
       },
       {
         "exercise": "squat",
         "weight_kg": 100.0,
         "reps": 5,
-        "expected_rir": 4.486700594425201
+        "expected_rir": 2.7405959367752075
       }
     ]
   },
@@ -58,12 +58,12 @@
       180.0
     ],
     "expected_mpc": {
-      "chest": 0.8960902690887451,
-      "anterior_delts": 0.9982710480690002,
-      "lateral_delts": 0.9997981786727905,
-      "rear_delts": 0.9999497532844543,
+      "chest": 0.8074889183044434,
+      "anterior_delts": 0.9983830451965332,
+      "lateral_delts": 0.9993686676025391,
+      "rear_delts": 1.0,
       "rhomboids": 1.0,
-      "triceps": 0.9887697696685791,
+      "triceps": 0.9959080219268799,
       "biceps": 1.0,
       "lats": 1.0,
       "quads": 1.0,
@@ -79,7 +79,7 @@
         "exercise": "bench_press",
         "weight_kg": 95.0,
         "reps": 6,
-        "expected_rir": 4.5405712723731995
+        "expected_rir": 1.4013610780239105
       }
     ]
   },
@@ -136,12 +136,12 @@
       180.0
     ],
     "expected_mpc": {
-      "chest": 0.23990362882614136,
-      "anterior_delts": 0.695217490196228,
-      "lateral_delts": 0.9144098162651062,
-      "rear_delts": 0.986078679561615,
+      "chest": 0.10746884346008301,
+      "anterior_delts": 0.725401759147644,
+      "lateral_delts": 0.7711713314056396,
+      "rear_delts": 0.9554247260093689,
       "rhomboids": 1.0,
-      "triceps": 0.6657977104187012,
+      "triceps": 0.7784227132797241,
       "biceps": 1.0,
       "lats": 1.0,
       "quads": 1.0,
@@ -157,19 +157,19 @@
         "exercise": "bench_press",
         "weight_kg": 80.0,
         "reps": 5,
-        "expected_rir": 1.2180107831954956
+        "expected_rir": 0.5361486971378326
       },
       {
         "exercise": "squat",
         "weight_kg": 120.0,
         "reps": 5,
-        "expected_rir": 4.543844759464264
+        "expected_rir": 1.9688796997070312
       },
       {
         "exercise": "lat_pulldown",
         "weight_kg": 70.0,
         "reps": 8,
-        "expected_rir": 1.6395604610443115
+        "expected_rir": 0.010953352320939302
       }
     ]
   },
@@ -220,11 +220,11 @@
       "triceps": 1.0,
       "biceps": 1.0,
       "lats": 1.0,
-      "quads": 0.9794510006904602,
-      "hamstrings": 0.9958564043045044,
-      "glutes": 0.9995086193084717,
+      "quads": 0.9793294072151184,
+      "hamstrings": 0.9968016147613525,
+      "glutes": 0.9995444416999817,
       "adductors": 1.0,
-      "erectors": 0.9996645450592041,
+      "erectors": 0.9997477531433105,
       "calves": 1.0,
       "abs": 1.0
     },
@@ -233,7 +233,7 @@
         "exercise": "squat",
         "weight_kg": 100.0,
         "reps": 5,
-        "expected_rir": 4.4875165820121765
+        "expected_rir": 3.040049374103546
       }
     ]
   },
@@ -269,12 +269,12 @@
       180.0
     ],
     "expected_mpc": {
-      "chest": 0.6058312654495239,
-      "anterior_delts": 0.8151161670684814,
-      "lateral_delts": 0.977074146270752,
-      "rear_delts": 0.9951390027999878,
+      "chest": 0.27384209632873535,
+      "anterior_delts": 0.909817099571228,
+      "lateral_delts": 0.852626383304596,
+      "rear_delts": 0.9844405055046082,
       "rhomboids": 1.0,
-      "triceps": 0.9006895422935486,
+      "triceps": 0.9882004261016846,
       "biceps": 1.0,
       "lats": 1.0,
       "quads": 1.0,

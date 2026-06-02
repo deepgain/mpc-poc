@@ -17,6 +17,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'model_assets.dart';
+import 'strength.dart';
 import 'types.dart';
 
 /// f_net invocation contract: returns drop[15] for one set.
@@ -146,19 +147,29 @@ class DeepGain {
   /// Replays [history] through the model — recovery between sets, fatigue
   /// after each set, then a final recovery up to [timestamp].
   ///
+  /// When [strengthPriors] is provided, anchors are dynamically updated per
+  /// session via `buildAnchorHistoryFromCompletedSets` (mirrors what Python's
+  /// `predict_mpc` does internally). Required for any model with
+  /// `strength_feature_dim > 0` (Variant 2 onwards) — without it, anchors
+  /// are pinned to [anchorsKg] for every set and outputs will diverge from
+  /// the reference. For models with `strength_feature_dim = 0`, the static
+  /// path is fine since anchors are unused by the network.
+  ///
   /// Empty history → all muscles at 1.0 (fresh).
   /// Sets after [timestamp] are excluded. Unknown exercises are skipped.
   Mpc predictMpc({
     required List<WorkoutSet> history,
     required DateTime timestamp,
     AnchorsKg? anchorsKg,
+    StrengthPriors? strengthPriors,
   }) {
-    final anchors = anchorsKg ?? defaultAnchorsKg;
-    final anchorsN = Float32List.fromList(
-      anchors.map((kg) => kg / scales.weight).toList(),
+    final initialAnchorsKg = anchorsKg ?? defaultAnchorsKg;
+    final initialAnchorsN = Float32List.fromList(
+      initialAnchorsKg.map((kg) => kg / scales.weight).toList(),
     );
 
     final valid = <_Set>[];
+    final validRaw = <Map<String, dynamic>>[];
     for (final h in history) {
       if (h.timestamp.isAfter(timestamp)) continue;
       final idx = exerciseToIdx[h.exercise];
@@ -170,24 +181,48 @@ class DeepGain {
         rirN: h.rir / scales.rir,
         ts: h.timestamp,
       ));
+      validRaw.add(h.toJson());
     }
     if (valid.isEmpty) {
       return {for (final m in muscles) m: 1.0};
     }
-    valid.sort((a, b) => a.ts.compareTo(b.ts));
+
+    // Sort both lists in lock-step by timestamp.
+    final order = List<int>.generate(valid.length, (i) => i)
+      ..sort((a, b) => valid[a].ts.compareTo(valid[b].ts));
+    final sortedValid = [for (final i in order) valid[i]];
+    final sortedRaw = [for (final i in order) validRaw[i]];
+
+    // Per-set anchors. Without strengthPriors, every set gets initialAnchorsN.
+    List<Float32List> perSetAnchorsN;
+    if (strengthPriors != null) {
+      final ah = strengthPriors.buildAnchorHistoryFromCompletedSets(
+        initialAnchorsKg, sortedRaw,
+      );
+      perSetAnchorsN = [
+        for (final a in ah.history)
+          Float32List.fromList(
+            a.map((kg) => kg / scales.weight).toList(),
+          ),
+      ];
+    } else {
+      perSetAnchorsN = List<Float32List>.filled(sortedValid.length, initialAnchorsN);
+    }
 
     final m = muscles.length;
     final mpc = Float32List(m)..fillRange(0, m, 1.0);
-    var prevTs = valid.first.ts;
+    var prevTs = sortedValid.first.ts;
 
-    for (var i = 0; i < valid.length; i++) {
-      final s = valid[i];
+    for (var i = 0; i < sortedValid.length; i++) {
+      final s = sortedValid[i];
       if (i > 0) {
         final dtH = s.ts.difference(prevTs).inMicroseconds / 3.6e9;
         _applyRecovery(mpc, dtH);
       }
       final inv = involvement[s.exerciseIdx];
-      final drop = _callFNet(s.exerciseIdx, s.weightN, s.repsN, s.rirN, mpc, anchorsN);
+      final drop = _callFNet(
+        s.exerciseIdx, s.weightN, s.repsN, s.rirN, mpc, perSetAnchorsN[i],
+      );
       for (var k = 0; k < m; k++) {
         var v = mpc[k] * (1.0 - inv[k] * drop[k]);
         if (v < 0.1) v = 0.1;

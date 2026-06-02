@@ -19,6 +19,7 @@ import 'dart:convert';
 
 import 'package:deepgain_app/inference/deepgain.dart';
 import 'package:deepgain_app/inference/model_assets.dart';
+import 'package:deepgain_app/inference/strength.dart';
 import 'package:deepgain_app/inference/types.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
@@ -32,11 +33,13 @@ void main() {
 
   late ModelAssets assets;
   late DeepGain deepgain;
+  late StrengthPriors strengthPriors;
   late List<dynamic> fixtures;
 
   setUpAll(() async {
     assets = await ModelAssets.load();
     deepgain = DeepGain.fromAssets(assets);
+    strengthPriors = await StrengthPriors.load();
     fixtures = jsonDecode(
       await rootBundle.loadString('assets/golden/golden.json'),
     ) as List;
@@ -65,6 +68,7 @@ void main() {
 
       final actualMpc = deepgain.predictMpc(
         history: history, timestamp: queryTs, anchorsKg: anchorsKg,
+        strengthPriors: strengthPriors,
       );
 
       for (final entry in expectedMpc.entries) {
