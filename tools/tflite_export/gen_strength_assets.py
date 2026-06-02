@@ -13,8 +13,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
-os.chdir(REPO_ROOT)
+MODELS_DIR = REPO_ROOT / "models"
+sys.path.insert(0, str(MODELS_DIR))
+os.chdir(MODELS_DIR)
 
 from strength_priors import (  # noqa: E402
     ANCHOR_ALIASES,

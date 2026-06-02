@@ -24,9 +24,10 @@ import numpy as np
 import tensorflow as tf
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+MODELS_DIR = REPO_ROOT / "models"
+sys.path.insert(0, str(MODELS_DIR))
 import os
-os.chdir(REPO_ROOT)
+os.chdir(MODELS_DIR)
 
 from inference import (  # noqa: E402
     EXERCISE_TO_IDX,
@@ -241,7 +242,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--checkpoint",
-        default=str(REPO_ROOT / "deepgain_model_muscle_ord.pt"),
+        default=str(MODELS_DIR / "deepgain_model_best.pt"),
     )
     parser.add_argument("--n-scenarios", type=int, default=50)
     parser.add_argument("--max-history", type=int, default=20)

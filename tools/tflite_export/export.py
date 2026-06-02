@@ -40,8 +40,9 @@ import litert_torch
 # inference.py also reads exercise_muscle_order.yaml + exercise_muscle_weights_scaled.csv
 # from CWD, so chdir there before importing.
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
-os.chdir(REPO_ROOT)
+MODELS_DIR = REPO_ROOT / "models"
+sys.path.insert(0, str(MODELS_DIR))
+os.chdir(MODELS_DIR)
 
 from inference import (  # noqa: E402
     ALL_EXERCISES,
@@ -96,6 +97,12 @@ class FatigueModule(nn.Module):
         self.num_muscles = source_model.num_muscles
 
     def forward(self, exercise_idx, weight, reps, rir, mpc, anchors):
+        # Inputs come in as rank-1 (1,) for Dart compatibility — squeeze to
+        # 0-d for the strength-feature path so cat sees uniform ranks.
+        weight_s = weight.reshape(())
+        reps_s = reps.reshape(())
+        rir_s = rir.reshape(())
+
         # Embeddings.
         e_embed = self.exercise_embed_w.index_select(0, exercise_idx.view(1)).squeeze(0)  # (E,)
         m_embed_all = self.muscle_embed_w  # (15, E) constant
@@ -107,8 +114,8 @@ class FatigueModule(nn.Module):
             available = self.projection_available.index_select(0, exercise_idx.view(1)).squeeze(0)
             relative_load = torch.where(
                 projected > 1e-6,
-                weight / projected.clamp_min(1e-6),
-                torch.zeros_like(weight),
+                weight_s / projected.clamp_min(1e-6),
+                torch.zeros_like(weight_s),
             )
             strength_feat = torch.cat(
                 [
@@ -124,9 +131,9 @@ class FatigueModule(nn.Module):
 
         # Build per-muscle input rows: shape (15, 4 + S + 2E)
         M = self.num_muscles
-        weight_v = weight.view(1).expand(M)
-        reps_v = reps.view(1).expand(M)
-        rir_v = rir.view(1).expand(M)
+        weight_v = weight_s.view(1).expand(M)
+        reps_v = reps_s.view(1).expand(M)
+        rir_v = rir_s.view(1).expand(M)
         e_embed_v = e_embed.view(1, -1).expand(M, -1)
 
         pieces = [
@@ -167,6 +174,8 @@ class RIRModule(nn.Module):
         self.strength_feature_dim = source_model.strength_feature_dim
 
     def forward(self, exercise_idx, weight, reps, mpc_all, anchors):
+        weight_s = weight.reshape(())  # rank-1 → 0-d for strength_feat shape compat
+        reps_s = reps.reshape(())
         e_embed = self.exercise_embed_w.index_select(0, exercise_idx.view(1)).squeeze(0)  # (E,)
 
         if self.strength_feature_dim > 0:
@@ -175,8 +184,8 @@ class RIRModule(nn.Module):
             available = self.projection_available.index_select(0, exercise_idx.view(1)).squeeze(0)
             relative_load = torch.where(
                 projected > 1e-6,
-                weight / projected.clamp_min(1e-6),
-                torch.zeros_like(weight),
+                weight_s / projected.clamp_min(1e-6),
+                torch.zeros_like(weight_s),
             )
             strength_feat = torch.cat(
                 [
@@ -187,9 +196,9 @@ class RIRModule(nn.Module):
                 ],
                 dim=-1,
             )[: self.strength_feature_dim]
-            pieces = [weight.view(1), reps.view(1), strength_feat, e_embed, mpc_all]
+            pieces = [weight_s.view(1), reps_s.view(1), strength_feat, e_embed, mpc_all]
         else:
-            pieces = [weight.view(1), reps.view(1), e_embed, mpc_all]
+            pieces = [weight_s.view(1), reps_s.view(1), e_embed, mpc_all]
 
         x = torch.cat(pieces, dim=-1).unsqueeze(0)  # (1, F) — RIRNet expects batch dim
         # RIRNet.forward applies sigmoid manually; we replicate by walking .net.
@@ -314,8 +323,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--checkpoint",
-        default=str(REPO_ROOT / "deepgain_model_muscle_ord.pt"),
-        help="Path to the .pt file (default: deepgain_model_muscle_ord.pt at repo root)",
+        default=str(MODELS_DIR / "deepgain_model_best.pt"),
+        help="Path to the .pt file (default: models/deepgain_model_best.pt — "
+             "the canonical model per models/README.md and README_INFERENCE.md)",
     )
     args = parser.parse_args()
 

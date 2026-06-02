@@ -14,8 +14,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
-os.chdir(REPO_ROOT)
+MODELS_DIR = REPO_ROOT / "models"
+sys.path.insert(0, str(MODELS_DIR))
+os.chdir(MODELS_DIR)
 
 from inference import EXERCISE_TO_IDX, load_model, predict_mpc, predict_rir  # noqa: E402
 
@@ -123,7 +124,7 @@ def scenario_unknown_exercise_filtered():
 
 def main():
     GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    model = load_model("deepgain_model_muscle_ord.pt", device="cpu")
+    model = load_model(str(MODELS_DIR / "deepgain_model_best.pt"), device="cpu")
     scenarios = [
         scenario_fresh_user(),
         scenario_single_set(),
