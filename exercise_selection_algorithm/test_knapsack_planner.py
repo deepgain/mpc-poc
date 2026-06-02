@@ -737,10 +737,10 @@ class TestConstraintEvaluation(unittest.TestCase):
         """UNDERFATIGUE trafia do notes (diagnostyka), NIE do violations.
         Gdy selected=None (unit test bez kontekstu planu), pojawia się dla każdego was_worked mięśnia."""
         before = {m: 1.0 for m in DEFAULT_TARGET_ZONES}
-        violations, notes = self._p()._evaluate_constraints(before, {**before, "chest": 0.90})
-        # Nie powinno być w violations (chest=0.90 > min, więc to nie overfatigue)
+        violations, notes = self._p()._evaluate_constraints(before, {**before, "chest": 0.92})
+        # Nie powinno być w violations (chest=0.92 > min, więc to nie overfatigue)
         self.assertFalse(any("OVERFATIGUE" in v and "chest" in v for v in violations))
-        # Powinno być w notes jako UNDERFATIGUE (mięsień pracował ale MPC > max)
+        # Powinno być w notes jako UNDERFATIGUE (mięsień pracował ale MPC > max=0.90)
         self.assertTrue(any("UNDERFATIGUE" in n and "chest" in n for n in notes))
 
     def test_brak_noty_dla_niepracujacego_miesnia(self):

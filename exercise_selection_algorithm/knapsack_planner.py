@@ -475,6 +475,8 @@ class KnapsackPlanner:
         for ex_id in sorted(self._known_exercises):
             if ex_id in exclusions:
                 continue
+            if self._primarilyTargetsFatiguedMuscle(ex_id, mpc_state):
+                continue
             meta = EXERCISE_META[ex_id]
 
             # Wyznacz weight i reps przez model (bez Brzycki)
@@ -536,6 +538,26 @@ class KnapsackPlanner:
             reverse=True,
         )
         return candidates
+
+    def _primarilyTargetsFatiguedMuscle(
+        self,
+        ex_id: str,
+        mpc_state: Dict[str, float],
+        involvement_threshold: float = 0.60,
+    ) -> bool:
+        """
+        Zwraca True jeśli główny mięsień ćwiczenia (zaangażowanie ≥ threshold)
+        jest już poniżej target_min przed sesją — czyli mamy pre-sesyjne zmęczenie
+        z poprzednich treningów. Takie ćwiczenie pomijamy na etapie budowania
+        kandydatów, żeby nie dokładać pracy na już przetrenowany mięsień.
+        """
+        involvement = MUSCLE_INVOLVEMENT.get(ex_id, {})
+        for muscle, ratio in involvement.items():
+            if ratio >= involvement_threshold:
+                t_min = self.target_zones.get(muscle, [0.55, 0.85])[0]
+                if mpc_state.get(muscle, 1.0) < t_min:
+                    return True
+        return False
 
     # Stała liczba powtórzeń dla wszystkich ćwiczeń
     FIXED_REPS = 10
