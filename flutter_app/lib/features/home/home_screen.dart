@@ -29,24 +29,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // an exercising figure for muscle training/recovery, a full-body figure
   // for the body map, a clock for session history.
   static const _tabs = <_TabSpec>[
-    _TabSpec(
-      'Muscles',
-      Icons.sports_gymnastics_outlined,
-      Icons.sports_gymnastics,
-      _MusclesTab(),
-    ),
+    _TabSpec('Muscles', Icons.bolt_outlined, Icons.bolt, _MusclesTab()),
     _TabSpec(
       'Body',
       Icons.accessibility_new_outlined,
       Icons.accessibility_new,
       BodyMapScreen(),
     ),
-    _TabSpec(
-      'History',
-      Icons.history_outlined,
-      Icons.history,
-      HistoryScreen(),
-    ),
+    _TabSpec('History', Icons.history_outlined, Icons.history, HistoryScreen()),
   ];
 
   /// Refresh the data backing each tab when it becomes visible. Without
@@ -89,23 +79,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         index: _tab,
         children: [for (final t in _tabs) t.body],
       ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: _BottomBar(
+        tabs: _tabs,
         selectedIndex: _tab,
-        // Always show every tab's label, not just the selected one — a row of
-        // bare icons with one label reads as broken/unbalanced.
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        onDestinationSelected: (i) {
+        onSelected: (i) {
           setState(() => _tab = i);
           _refreshFor(i);
         },
-        destinations: [
-          for (final t in _tabs)
-            NavigationDestination(
-              icon: Icon(t.icon),
-              selectedIcon: Icon(t.selectedIcon),
-              label: t.label,
-            ),
-        ],
       ),
       floatingActionButton: _StartWorkoutButton(
         onPressed: () => _openPlanSheet(context),
@@ -130,6 +110,103 @@ class _TabSpec {
   final IconData selectedIcon;
   final Widget body;
   const _TabSpec(this.label, this.icon, this.selectedIcon, this.body);
+}
+
+/// Custom bottom navigation bar. Built by hand (rather than NavigationBar) so
+/// every tab always shows icon + label, and the selected tab gets an animated
+/// rounded pill behind a filled icon plus a primary-tinted label — visually
+/// balanced and cohesive with the gradient "Start workout" button.
+class _BottomBar extends StatelessWidget {
+  final List<_TabSpec> tabs;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  const _BottomBar({
+    required this.tabs,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surface,
+      // Hairline separator so the bar reads as its own surface above content.
+      shape: Border(top: BorderSide(color: scheme.outlineVariant, width: 1)),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            children: [
+              for (var i = 0; i < tabs.length; i++)
+                Expanded(
+                  child: _BottomBarItem(
+                    tab: tabs[i],
+                    selected: i == selectedIndex,
+                    onTap: () => onSelected(i),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomBarItem extends StatelessWidget {
+  final _TabSpec tab;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _BottomBarItem({
+    required this.tab,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final accent = selected ? scheme.primary : scheme.onSurfaceVariant;
+    return InkWell(
+      onTap: onTap,
+      // Suppress the full-cell rectangular ripple — the animated pill below is
+      // the only highlight, so two competing highlights don't stack.
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+            decoration: BoxDecoration(
+              color: selected ? scheme.primary.withValues(alpha: 0.14) : null,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(
+              selected ? tab.selectedIcon : tab.icon,
+              size: 24,
+              color: accent,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            tab.label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Prominent gradient pill that launches the plan-a-workout sheet. Built as a
@@ -300,8 +377,8 @@ class _MuscleRow extends StatelessWidget {
     final color = mpc < 0.55
         ? scheme.error
         : mpc < 0.85
-            ? Colors.orange
-            : Colors.green;
+        ? Colors.orange
+        : Colors.green;
     final hoursToReady = _hoursToReach(0.85);
 
     return Card(
