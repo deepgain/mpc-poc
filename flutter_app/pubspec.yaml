@@ -1,7 +1,7 @@
 name: deepgain_app
 description: "DeepGain — on-device workout planner using a quantized PyTorch fatigue model exported to TFLite."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.6+6
 
 environment:
   sdk: ^3.10.8

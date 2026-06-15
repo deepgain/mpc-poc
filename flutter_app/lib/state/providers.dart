@@ -30,6 +30,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // Singletons
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// Upper bound on any single startup step the [_AppGate] splash waits on.
+/// If a step (model load, asset decode, DB open) ever stalls instead of
+/// completing or throwing, the `.timeout` turns the silent hang into a
+/// [TimeoutException] so the gate shows an actionable error + retry rather
+/// than spinning forever. This is what App Review flagged on iPad: a startup
+/// future that never completed left the spinner running indefinitely.
+const _startupTimeout = Duration(seconds: 15);
+
 final databaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
   ref.onDispose(db.close);
@@ -37,17 +45,17 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 });
 
 final modelAssetsProvider = FutureProvider<ModelAssets>((ref) async {
-  final assets = await ModelAssets.load();
+  final assets = await ModelAssets.load().timeout(_startupTimeout);
   ref.onDispose(assets.close);
   return assets;
 });
 
 final strengthPriorsProvider = FutureProvider<StrengthPriors>((ref) async {
-  return StrengthPriors.load();
+  return StrengthPriors.load().timeout(_startupTimeout);
 });
 
 final plannerMetaProvider = FutureProvider<PlannerMeta>((ref) async {
-  return PlannerMeta.load();
+  return PlannerMeta.load().timeout(_startupTimeout);
 });
 
 final deepGainProvider = FutureProvider<DeepGain>((ref) async {
@@ -71,7 +79,10 @@ final deepGainProvider = FutureProvider<DeepGain>((ref) async {
 /// to refresh — see `OnboardingScreen._start` and `SettingsScreen`.
 final anchorsProvider = FutureProvider<AnchorsKg?>((ref) async {
   final db = ref.watch(databaseProvider);
-  final row = await db.getAnchors();
+  // Timed out so a stalled DB open (e.g. drift's background isolate failing to
+  // come up) surfaces as an error instead of an endless splash. See
+  // [_startupTimeout].
+  final row = await db.getAnchors().timeout(_startupTimeout);
   if (row == null) return null;
   return [row.benchPressKg, row.squatKg, row.deadliftKg];
 });

@@ -1,4 +1,4 @@
-package com.deepgain.deepgain_app
+package org.deepgain
 
 import io.flutter.embedding.android.FlutterActivity
 

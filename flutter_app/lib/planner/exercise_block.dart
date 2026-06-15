@@ -50,6 +50,28 @@ class ExerciseBlock {
     required this.secondaryMuscles,
   });
 
+  /// Copy with overridden fields. Used when the user adjusts the prescribed
+  /// weight/reps/RIR for the current set in the live training screen.
+  ExerciseBlock copyWith({
+    double? weightKg,
+    int? reps,
+    double? predictedRir,
+  }) {
+    return ExerciseBlock(
+      exerciseId: exerciseId,
+      weightKg: weightKg ?? this.weightKg,
+      reps: reps ?? this.reps,
+      setsCount: setsCount,
+      restSec: restSec,
+      predictedRir: predictedRir ?? this.predictedRir,
+      stimulusScore: stimulusScore,
+      timeCostSec: timeCostSec,
+      exType: exType,
+      primaryMuscles: primaryMuscles,
+      secondaryMuscles: secondaryMuscles,
+    );
+  }
+
   Map<String, dynamic> toJson() => {
         'exercise_id': exerciseId,
         'weight_kg': weightKg,

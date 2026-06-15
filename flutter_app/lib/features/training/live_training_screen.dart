@@ -187,49 +187,41 @@ class _LiveTrainingScreenState extends ConsumerState<LiveTrainingScreen> {
         initialRir: block.predictedRir,
       ),
     );
-    if (result == null) return;
-    await _markCurrentSetDone(
-      weightKgOverride: result.weight,
-      repsOverride: result.reps,
-      rirOverride: result.rir,
-    );
+    if (result == null || !mounted) return;
+    // Only update the current set's prescribed values — do NOT mark it done.
+    // The user completes the set explicitly with the "Done" button.
+    setState(() {
+      _blocks[0] = block.copyWith(
+        weightKg: result.weight,
+        reps: result.reps,
+        predictedRir: result.rir,
+      );
+    });
   }
 
-  // ── Dismiss + replan ────────────────────────────────────────────────────
+  // ── Change exercise (replan) ─────────────────────────────────────────────
 
-  Future<void> _dismissCurrentBlock() async {
+  Future<void> _changeExercise() async {
     final block = _currentBlock;
-    if (block == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('Drop ${_pretty(block.exerciseId)}?'),
-        content: const Text(
-          "We'll find another exercise for the remaining time.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Drop'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+    if (block == null || _busyAdvancing) return;
+
+    // Snapshot so the swap can be undone from the SnackBar.
+    final prevBlocks = List.of(_blocks);
+    final prevSetInBlock = _setInBlock;
 
     setState(() => _busyAdvancing = true);
     try {
       _dismissed.add(block.exerciseId);
-      // Log dismissal (analytics).
+      // Log the swap (analytics).
       if (_sessionId != null) {
         await ref.read(databaseProvider).logDismissed(_sessionId!, block.exerciseId);
       }
 
-      // Re-plan the rest of the session, treating completed sets as history.
+      // Replace ONLY the current exercise — keep the rest of the plan intact so
+      // the total exercise count stays stable (a swap, not a full re-plan).
+      // Exclude the remaining blocks too so the replacement isn't a duplicate
+      // of something still to come.
+      final keepRest = _blocks.sublist(1);
       final planner = await ref.read(plannerProvider.future);
       final pastHistory = ref.read(historyProvider).value ?? const [];
       final fullHistory = [...pastHistory, ..._completedSets];
@@ -237,17 +229,75 @@ class _LiveTrainingScreenState extends ConsumerState<LiveTrainingScreen> {
         userHistory: fullHistory,
         timeBudgetSec: _remainingTimeSec,
         targetRir: widget.targetRir,
-        exclusions: _dismissed,
+        exclusions: {..._dismissed, for (final b in keepRest) b.exerciseId},
       );
 
       if (!mounted) return;
+
+      // Prefer a like-for-like replacement (same exercise type), else the
+      // planner's top pick.
+      final candidates = newPlan.blocks;
+      final replacement = candidates.isEmpty
+          ? null
+          : candidates.firstWhere(
+              (b) => b.exType == block.exType,
+              orElse: () => candidates.first,
+            );
+
+      if (replacement == null) {
+        // No alternative available — revert the dismissal and tell the user.
+        _dismissed.remove(block.exerciseId);
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('No alternative exercise available.'),
+          ));
+        return;
+      }
+
       setState(() {
-        _blocks = List.of(newPlan.blocks);
+        _blocks = [replacement, ...keepRest];
         _setInBlock = 1;
       });
+      _showChangeFeedback(
+        from: block.exerciseId,
+        to: replacement.exerciseId,
+        prevBlocks: prevBlocks,
+        prevSetInBlock: prevSetInBlock,
+        dismissedId: block.exerciseId,
+      );
     } finally {
       if (mounted) setState(() => _busyAdvancing = false);
     }
+  }
+
+  void _showChangeFeedback({
+    required String from,
+    required String to,
+    required List<ExerciseBlock> prevBlocks,
+    required int prevSetInBlock,
+    required String dismissedId,
+  }) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text('${_pretty(from)}  →  ${_pretty(to)}'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted) return;
+            setState(() {
+              _blocks = prevBlocks;
+              _setInBlock = prevSetInBlock;
+              _dismissed.remove(dismissedId);
+            });
+          },
+        ),
+      ),
+    );
   }
 
   // ── End session ─────────────────────────────────────────────────────────
@@ -343,7 +393,7 @@ class _LiveTrainingScreenState extends ConsumerState<LiveTrainingScreen> {
                 restSecondsLeft: _restSecondsLeft,
                 onDone: () => _markCurrentSetDone(),
                 onAdjust: _openAdjust,
-                onDismiss: _dismissCurrentBlock,
+                onChange: _changeExercise,
                 onSkipRest: _skipRest,
               ),
             if (_busyAdvancing)
@@ -374,7 +424,7 @@ class _ActiveBlockView extends StatelessWidget {
   final int restSecondsLeft;
   final VoidCallback onDone;
   final VoidCallback onAdjust;
-  final VoidCallback onDismiss;
+  final VoidCallback onChange;
   final VoidCallback onSkipRest;
 
   const _ActiveBlockView({
@@ -385,7 +435,7 @@ class _ActiveBlockView extends StatelessWidget {
     required this.restSecondsLeft,
     required this.onDone,
     required this.onAdjust,
-    required this.onDismiss,
+    required this.onChange,
     required this.onSkipRest,
   });
 
@@ -404,43 +454,66 @@ class _ActiveBlockView extends StatelessWidget {
             color: scheme.surfaceContainerHigh,
             child: Padding(
               padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Text(
-                    _pretty(block.exerciseId),
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 320),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.10),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Set $setInBlock of ${block.setsCount}',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
+                ),
+                child: SizedBox(
+                  // Key drives the animation: changes on every set advance
+                  // (Done) and every exercise swap (Change exercise).
+                  key: ValueKey('${block.exerciseId}_$setInBlock'),
+                  width: double.infinity,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _pretty(block.exerciseId),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Set $setInBlock of ${block.setsCount}',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        '${block.weightKg.toStringAsFixed(1)} kg',
+                        style: theme.textTheme.displayMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: scheme.primary,
+                        ),
+                      ),
+                      Text(
+                        '× ${block.reps} reps',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Predicted RIR ${block.predictedRir.toStringAsFixed(1)}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 24),
-                  Text(
-                    '${block.weightKg.toStringAsFixed(1)} kg',
-                    style: theme.textTheme.displayMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: scheme.primary,
-                    ),
-                  ),
-                  Text(
-                    '× ${block.reps} reps',
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Predicted RIR ${block.predictedRir.toStringAsFixed(1)}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -477,9 +550,9 @@ class _ActiveBlockView extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 TextButton.icon(
-                  onPressed: onDismiss,
-                  icon: const Icon(Icons.close),
-                  label: const Text('Skip this exercise'),
+                  onPressed: onChange,
+                  icon: const Icon(Icons.swap_horiz),
+                  label: const Text('Change exercise'),
                   style: TextButton.styleFrom(
                     minimumSize: const Size.fromHeight(48),
                     foregroundColor: scheme.onSurfaceVariant,

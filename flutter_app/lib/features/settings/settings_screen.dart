@@ -271,10 +271,19 @@ class _ExportTileState extends ConsumerState<_ExportTile> {
       }
       final file = await exporter.exportToFile();
       if (!mounted) return;
+      // iPad requires a source rect for the share popover; harmless on iPhone.
+      final box = context.findRenderObject() as RenderBox?;
       await Share.shareXFiles(
-        [XFile(file.path)],
+        [XFile(file.path, mimeType: 'text/csv')],
         subject: 'DeepGain training data ($count sets)',
-        text: 'DeepGain training data export (DeepGain Data Standard v2)',
+        sharePositionOrigin: box != null
+            ? box.localToGlobal(Offset.zero) & box.size
+            : null,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: $e')),
       );
     } finally {
       if (mounted) setState(() => _exporting = false);

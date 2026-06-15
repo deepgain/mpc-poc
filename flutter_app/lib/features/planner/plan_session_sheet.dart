@@ -1,13 +1,11 @@
 /// Plan-a-session bottom sheet: time / intensity / muscle-group exclusion
-/// chips, then "Generate" runs KnapsackPlanner.plan and shows the proposed
-/// blocks for review. From there, "Start workout" navigates to the live
-/// training screen.
+/// chips, then "Start workout" runs KnapsackPlanner.plan and goes straight
+/// into the live training screen — the user never sees the full plan upfront.
 library;
 
 import 'dart:async';
 
 import 'package:deepgain_app/features/training/live_training_screen.dart';
-import 'package:deepgain_app/planner/exercise_block.dart';
 import 'package:deepgain_app/state/providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -55,7 +53,7 @@ class _PlanSessionSheetState extends ConsumerState<PlanSessionSheet> {
     };
   }
 
-  Future<void> _generate() async {
+  Future<void> _start() async {
     setState(() => _generating = true);
     try {
       final planner = await ref.read(plannerProvider.future);
@@ -68,11 +66,11 @@ class _PlanSessionSheetState extends ConsumerState<PlanSessionSheet> {
       );
       if (!mounted) return;
       Navigator.of(context).pop(); // close sheet
-      // Push the review screen on top of home.
+      // Skip the plan-review screen — go straight into the live workout.
       unawaited(Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => _PlanReviewScreen(
-            plan: plan,
+          builder: (_) => LiveTrainingScreen(
+            initialPlan: plan,
             timeBudgetSec: _timeMin * 60,
             targetRir: _targetRir,
           ),
@@ -146,7 +144,7 @@ class _PlanSessionSheetState extends ConsumerState<PlanSessionSheet> {
           ),
           const SizedBox(height: 24),
           FilledButton(
-            onPressed: _generating ? null : _generate,
+            onPressed: _generating ? null : _start,
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(56),
               textStyle: theme.textTheme.titleMedium,
@@ -156,7 +154,7 @@ class _PlanSessionSheetState extends ConsumerState<PlanSessionSheet> {
                     height: 24, width: 24,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Generate'),
+                : const Text('Start workout'),
           ),
         ],
       ),
@@ -218,180 +216,3 @@ class _ChipGroup<T> extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Review screen: shows the generated plan, then "Start workout" enters
-// LiveTrainingScreen.
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _PlanReviewScreen extends StatelessWidget {
-  final dynamic plan; // KnapsackPlan
-  final int timeBudgetSec;
-  final int targetRir;
-
-  const _PlanReviewScreen({
-    required this.plan,
-    required this.timeBudgetSec,
-    required this.targetRir,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final blocks = (plan.blocks as List<ExerciseBlock>);
-    final totalMin = (plan.totalTimeSec as int) ~/ 60;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Your plan')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-        children: [
-          Text(
-            '${blocks.length} exercises · ~$totalMin min',
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          for (var i = 0; i < blocks.length; i++) ...[
-            _BlockCard(index: i + 1, block: blocks[i]),
-            const SizedBox(height: 8),
-          ],
-          if ((plan.constraintViolations as List).isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: Card(
-                color: scheme.errorContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Heads up',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: scheme.onErrorContainer,
-                          )),
-                      const SizedBox(height: 4),
-                      for (final v in plan.constraintViolations)
-                        Text(v.toString(),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onErrorContainer,
-                            )),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: FilledButton(
-            onPressed: () {
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute<void>(
-                  builder: (_) => LiveTrainingScreen(
-                    initialPlan: plan,
-                    timeBudgetSec: timeBudgetSec,
-                    targetRir: targetRir,
-                  ),
-                ),
-              );
-            },
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(56),
-              textStyle: theme.textTheme.titleMedium,
-            ),
-            child: const Text('Start workout'),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BlockCard extends StatelessWidget {
-  final int index;
-  final ExerciseBlock block;
-
-  const _BlockCard({required this.index, required this.block});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final muscles = [...block.primaryMuscles, ...block.secondaryMuscles];
-    return Card(
-      elevation: 0,
-      color: scheme.surfaceContainerLow,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 14,
-                  backgroundColor: scheme.primary,
-                  foregroundColor: scheme.onPrimary,
-                  child: Text('$index',
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _pretty(block.exerciseId),
-                    style: theme.textTheme.titleMedium,
-                  ),
-                ),
-                Text(
-                  '${block.timeCostSec ~/ 60} min',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '${block.setsCount} × ${block.reps} @ ${block.weightKg.toStringAsFixed(1)} kg',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Predicted RIR ${block.predictedRir.toStringAsFixed(1)}',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-            if (muscles.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final m in muscles)
-                    Chip(
-                      label: Text(_pretty(m)),
-                      visualDensity: VisualDensity.compact,
-                      side: BorderSide.none,
-                      backgroundColor: scheme.surfaceContainerHigh,
-                    ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-String _pretty(String id) => id
-    .split('_')
-    .map((p) => p.isEmpty ? p : '${p[0].toUpperCase()}${p.substring(1)}')
-    .join(' ');

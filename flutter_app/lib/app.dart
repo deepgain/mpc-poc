@@ -43,22 +43,89 @@ class _AppGate extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Wait for the model + assets to load — without these no screen can render.
-    final assets = ref.watch(modelAssetsProvider);
-    final priors = ref.watch(strengthPriorsProvider);
-    final meta = ref.watch(plannerMetaProvider);
-    final anchors = ref.watch(anchorsProvider);
+    final gates = <(String, AsyncValue<Object?>)>[
+      ('model', ref.watch(modelAssetsProvider)),
+      ('strength priors', ref.watch(strengthPriorsProvider)),
+      ('planner meta', ref.watch(plannerMetaProvider)),
+      ('anchors', ref.watch(anchorsProvider)),
+    ];
 
-    final loaded = assets is AsyncData &&
-        priors is AsyncData &&
-        meta is AsyncData &&
-        anchors is AsyncData;
+    // Surface a failed load instead of hanging on the splash forever. Without
+    // this, any startup exception (e.g. an asset or the TFLite runtime failing
+    // to initialise on a given device) is indistinguishable from "still
+    // loading" — the spinner just spins. See onboarding/iPad infinite-spinner.
+    for (final (name, value) in gates) {
+      if (value case AsyncError(:final error, :final stackTrace)) {
+        // Log full detail for diagnostics, but never surface a raw stacktrace
+        // to the user — show a friendly, retryable screen instead.
+        debugPrint('Startup load failed ($name): $error\n$stackTrace');
+        return _StartupErrorScreen(
+          onRetry: () {
+            ref.invalidate(modelAssetsProvider);
+            ref.invalidate(strengthPriorsProvider);
+            ref.invalidate(plannerMetaProvider);
+            ref.invalidate(anchorsProvider);
+          },
+        );
+      }
+    }
 
+    final loaded = gates.every((g) => g.$2 is AsyncData);
     if (!loaded) {
       return const _SplashScreen();
     }
 
-    final hasAnchors = anchors.value != null;
+    final hasAnchors = ref.watch(anchorsProvider).value != null;
     return hasAnchors ? const HomeScreen() : const OnboardingScreen();
+  }
+}
+
+class _StartupErrorScreen extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _StartupErrorScreen({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.refresh, size: 48, color: scheme.primary),
+                const SizedBox(height: 20),
+                Text(
+                  "Couldn't get things ready",
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Something went wrong while starting up. Please try again.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                FilledButton(
+                  onPressed: onRetry,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  child: const Text('Try again'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
